@@ -166,37 +166,53 @@
                 msg += `*TOTAL: $${totalGeneral.toLocaleString()}*`;
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
-
+            // Versión compatible con Celulares (Usa Iframe invisible)
             const printDocument = (type) => {
                 const element = document.getElementById(type === 'pedido' ? 'budget-pdf' : 'price-list-pdf');
                 if (!element) return;
-                const printWindow = window.open('', '_blank', 'width=900,height=700');
-                printWindow.document.write(`
+
+                // 1. Creamos un Iframe temporal e invisible
+                const iframe = document.createElement('iframe');
+                Object.assign(iframe.style, {
+                    position: 'fixed',
+                    right: '0',
+                    bottom: '0',
+                    width: '0',
+                    height: '0',
+                    border: '0',
+                    visibility: 'hidden'
+                });
+                document.body.appendChild(iframe);
+
+                // 2. Escribimos el contenido en el Iframe
+                const doc = iframe.contentWindow.document;
+                doc.write(`
                     <html>
                         <head>
-                            <title>Imprimir - DR Distribuciones</title>
+                            <title>DR Distribuciones</title>
                             <style>
-                                body { font-family: sans-serif; color: #000; padding: 30px; }
+                                body { font-family: sans-serif; color: #000; padding: 20px; }
                                 table { width: 100%; border-collapse: collapse; margin-top: 20px; }
                                 th { background-color: #1e3a8a !important; color: white !important; padding: 12px; text-align: left; -webkit-print-color-adjust: exact; }
                                 td { padding: 10px; border-bottom: 1px solid #000; color: #000; }
-                                h1 { color: #1e3a8a; }
                                 .total-box { background-color: #1e3a8a !important; color: white !important; padding: 20px; text-align: right; border-radius: 10px; -webkit-print-color-adjust: exact; margin-top: 20px; }
                                 @media print { * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
                             </style>
                         </head>
                         <body>
                             ${element.innerHTML}
-                            <script>
-                                window.onload = function() {
-                                    window.print();
-                                    setTimeout(function() { window.close(); }, 500);
-                                };
-                            <\/script>
                         </body>
                     </html>
                 `);
-                printWindow.document.close();
+                doc.close();
+
+                // 3. Lanzamos la impresión
+                setTimeout(() => {
+                    iframe.contentWindow.focus();
+                    iframe.contentWindow.print();
+                    // Limpieza: eliminamos el iframe después de imprimir
+                    setTimeout(() => document.body.removeChild(iframe), 1000);
+                }, 500);
             };
 
             return (
