@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DR-CCS | VentasIQ Master</title>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; }
+        .print-template { display: none; }
+        @media print { #root { display: none !important; } }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyABBIDqDnx-yu75601EQZ-yQ_VNkbdApGY",
+            authDomain: "dr-ccs.firebaseapp.com",
+            projectId: "dr-ccs",
+            storageBucket: "dr-ccs.firebasestorage.app",
+            messagingSenderId: "715483746859",
+            appId: "1:715483746859:web:b3355feaa35baf709dd06e"
+        };
+
+        if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+        const db = firebase.firestore();
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('catalogo');
+            const [products, setProducts] = useState([]);
+            const [isLogged, setIsLogged] = useState(false);
+            const [searchTerm, setSearchTerm] = useState("");
+            const [nombre, setNombre] = useState("");
+            const [direccion, setDireccion] = useState("");
+            const [notas, setNotas] = useState("");
+            const [editingProduct, setEditingProduct] = useState(null);
+            const [bulkData, setBulkData] = useState("");
+            
+            const [cart, setCart] = useState(() => {
+                const saved = localStorage.getItem('dr_cart_v2');
+                return saved ? JSON.parse(saved) : {};
+            });
+
+            useEffect(() => {
+                localStorage.setItem('dr_cart_v2', JSON.stringify(cart));
+            }, [cart]);
+
+            useEffect(() => {
+                const unsubscribe = db.collection("productos").onSnapshot((snapshot) => {
+                    const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // Al actualizar desde Firebase, mantenemos los temporales que ya existan
+                    setProducts(prev => {
+                        const temps = prev.filter(p => p.isTemp);
+                        return [...prods, ...temps];
+                    });
+                    setTimeout(() => lucide.createIcons(), 150);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            const parseMoney = (val) => {
+                if (!val) return 0;
+                let clean = val.toString().replace("$", "").replace(/\./g, "").replace(",", ".");
+                return parseFloat(clean) || 0;
+            };
+
+            const selectedItems = useMemo(() => {
+                return products.filter(p => cart[p.id] && cart[p.id] > 0);
+            }, [products, cart]);
+
+            const totalGeneral = useMemo(() => {
+                return selectedItems.reduce((acc, p) => acc + ((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)), 0);
+            }, [selectedItems, cart]);
+
+            const clearCart = () => {
+                if(confirm("¿Deseas vaciar el pedido?")) {
+                    setCart({});
+                    setNombre("");
+                    setDireccion("");
+                    setNotas("");
+                    // Al vaciar el carrito, también eliminamos los productos temporales
+                    setProducts(prev => prev.filter(p => !p.isTemp));
+                }
+            };
+
+            const addTemporalProduct = () => {
+                const name = prompt("Descripción del producto:");
+                const priceInput = prompt("Precio unitario:");
+                if (!name || !priceInput) return;
+                
+                const price = parseMoney(priceInput);
+                const pack = parseInt(prompt("Unidades por bulto:")) || 1;
+                const cant = parseInt(prompt("Cantidad de bultos:")) || 1;
+
+                const tempId = "temp_" + Date.now();
+                const tempProduct = { id: tempId, name: "(ESPECIAL) " + name, price, pack, isTemp: true };
+                
+                setProducts(prev => [...prev, tempProduct]);
+                setCart(prev => ({ ...prev, [tempId]: cant }));
+            };
+
+            const clearAllProducts = async () => {
+                if(confirm("¡ATENCIÓN! ¿Borrar TODO el catálogo permanente?")) {
+                    const batch = db.batch();
+                    products.filter(p => !p.isTemp).forEach(p => batch.delete(db.collection("productos").doc(p.id)));
+                    await batch.commit();
+                }
+            };
+
+            const handleSaveProduct = async (e) => {
+                e.preventDefault();
+                const form = e.target;
+                const id = editingProduct ? editingProduct.id : Date.now().toString();
+                await db.collection("productos").doc(id).set({
+                    name: form.p_name.value,
+                    price: parseMoney(form.p_price.value),
+                    pack: parseInt(form.p_pack.value) || 1
+                });
+                setEditingProduct(null);
+                form.reset();
+            };
+
+            const handleBulkImport = async () => {
+                const rows = bulkData.trim().split("\n");
+                const batch = db.batch();
+                rows.forEach(row => {
+                    const cols = row.split("\t");
+                    if (cols.length >= 3) {
+                        const id = (Date.now() + Math.random()).toString().replace(".","");
+                        batch.set(db.collection("productos").doc(id), {
+                            name: cols[0].trim(),
+                            price: parseMoney(cols[1]),
+                            pack: parseInt(cols[2]) || 1
+                        });
+                    }
+                });
+                await batch.commit();
+                setBulkData("");
+                alert("Catálogo actualizado.");
+            };
+
+            const deleteProduct = async (id) => {
+                if(confirm("¿Eliminar?")) await db.collection("productos").doc(id).delete();
+            };
+
+            const sendWhatsApp = () => {
+                if (!nombre) return alert("Por favor, ingresa el nombre.");
+                let msg = `*PEDIDO DR DISTRIBUCIONES*\n*Cliente:* ${nombre}\n`;
+                if(direccion) msg += `*Dirección:* ${direccion}\n`;
+                if(notas) msg += `*Notas:* ${notas}\n`;
+                msg += `\n--------------------------\n\n`;
+                selectedItems.forEach(p => {
+                    msg += `• *${p.name}*\n  Cant: ${cart[p.id]} bultos | Subt: $${(cart[p.id] * p.price * p.pack).toLocaleString()}\n\n`;
+                });
+                msg += `*TOTAL: $${totalGeneral.toLocaleString()}*`;
+                window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
+            };
+
+            const printDocument = (type) => {
+                const element = document.getElementById(type === 'pedido' ? 'budget-pdf' : 'price-list-pdf');
+                if (!element) return;
+                const printWindow = window.open('', '_blank', 'width=900,height=700');
+                printWindow.document.write(`
+                    <html>
+                        <head>
+                            <title>Imprimir - DR Distribuciones</title>
+                            <style>
+                                body { font-family: sans-serif; color: #000; padding: 30px; }
+                                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                                th { background-color: #1e3a8a !important; color: white !important; padding: 12px; text-align: left; -webkit-print-color-adjust: exact; }
+                                td { padding: 10px; border-bottom: 1px solid #000; color: #000; }
+                                h1 { color: #1e3a8a; }
+                                .total-box { background-color: #1e3a8a !important; color: white !important; padding: 20px; text-align: right; border-radius: 10px; -webkit-print-color-adjust: exact; margin-top: 20px; }
+                                @media print { * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
+                            </style>
+                        </head>
+                        <body>
+                            ${element.innerHTML}
+                            <script>
+                                window.onload = function() {
+                                    window.print();
+                                    setTimeout(function() { window.close(); }, 500);
+                                };
+                            <\/script>
+                        </body>
+                    </html>
+                `);
+                printWindow.document.close();
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto md:my-8 bg-white shadow-2xl md:rounded-[2.5rem] flex flex-col min-h-screen md:min-h-0 border-8 border-white overflow-hidden">
+                    <nav className="bg-slate-900 text-white flex p-1.5 no-print">
+                        <button onClick={() => setActiveTab('catalogo')} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 ${activeTab === 'catalogo' ? 'bg-blue-600' : ''}`}>
+                            <i data-lucide="layout-grid" className="w-5 h-5"></i><span className="text-[10px] uppercase font-bold">Catálogo</span>
+                        </button>
+                        <button onClick={() => setActiveTab('presupuesto')} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 relative ${activeTab === 'presupuesto' ? 'bg-blue-600' : ''}`}>
+                            <i data-lucide="shopping-cart" className="w-5 h-5"></i><span className="text-[10px] uppercase font-bold">Pedido</span>
+                            {selectedItems.length > 0 && <span className="absolute top-2 right-4 bg-red-600 w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold">{selectedItems.length}</span>}
+                        </button>
+                        <button onClick={() => { if(isLogged) setActiveTab('gestion'); else { if(prompt("Clave:")==="11223344") setIsLogged(true); } }} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 ${activeTab === 'gestion' ? 'bg-orange-600' : ''}`}>
+                            <i data-lucide="shield-check" className="w-5 h-5"></i><span className="text-[10px] uppercase font-bold">Admin</span>
+                        </button>
+                    </nav>
+
+                    <div className="p-6 md:p-10 flex-1">
+                        {activeTab === 'catalogo' && (
+                            <section>
+                                <div className="flex justify-between items-center mb-8">
+                                    <div><h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1><p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p></div>
+                                </div>
+                                <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
+                                <div className="grid gap-3">
+                                    {/* CAMBIO CLAVE: Solo mostramos productos que NO sean temporales */}
+                                    {products.filter(p => !p.isTemp && p.name?.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+                                        <div key={p.id} className="p-5 border-2 border-slate-50 rounded-3xl flex flex-col md:flex-row justify-between items-center bg-white shadow-sm hover:border-blue-100 transition">
+                                            <div className="flex-1 w-full"><h3 className="font-bold text-slate-800">{p.name}</h3><p className="text-[10px] text-slate-400 font-bold uppercase">$ {p.price?.toLocaleString()} unit. | Pack x{p.pack}</p></div>
+                                            <div className="flex items-center gap-4 mt-4 md:mt-0">
+                                                <input type="number" className="w-20 p-2 border-2 rounded-xl text-center font-black text-blue-600" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                                <span className="font-black text-slate-900 w-28 text-right">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        )}
+
+                        {activeTab === 'presupuesto' && (
+                            <section className="space-y-6">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-2xl font-black text-slate-900">Resumen del Pedido</h2>
+                                    {selectedItems.length > 0 && <button onClick={clearCart} className="bg-red-50 text-red-600 px-4 py-2 rounded-xl text-xs font-bold uppercase flex items-center gap-1"><i data-lucide="trash-2" className="w-3 h-3"></i> Vaciar</button>}
+                                </div>
+                                {selectedItems.length === 0 ? <p className="text-center py-20 text-slate-300 font-bold uppercase">No hay productos seleccionados</p> : (
+                                    <>
+                                        <div className="bg-white border-2 rounded-3xl overflow-hidden shadow-sm">
+                                            {selectedItems.map(p => (
+                                                <div key={p.id} className="flex justify-between p-4 border-b last:border-0">
+                                                    <div><p className="font-bold text-slate-800">{p.name}</p><p className="text-[10px] text-slate-500 font-bold uppercase">{cart[p.id]} bultos ($ {p.price.toLocaleString()} un.)</p></div>
+                                                    <p className="font-black text-slate-900">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</p>
+                                                </div>
+                                            ))}
+                                            <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+                                                <span className="font-bold uppercase text-xs">Total del Pedido</span><span className="text-2xl font-black">$ {totalGeneral.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-4">
+                                            <input type="text" placeholder="Nombre del Cliente / Local" className="p-4 bg-slate-50 rounded-2xl border outline-none focus:border-blue-400" value={nombre} onChange={e => setNombre(e.target.value)} />
+                                            <input type="text" placeholder="Dirección de entrega" className="p-4 bg-slate-50 rounded-2xl border outline-none focus:border-blue-400" value={direccion} onChange={e => setDireccion(e.target.value)} />
+                                            <textarea placeholder="Observaciones o notas adicionales..." className="w-full p-4 bg-slate-50 rounded-2xl border h-24 outline-none focus:border-blue-400" value={notas} onChange={e => setNotas(e.target.value)} />
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <button onClick={sendWhatsApp} className="bg-green-600 text-white font-bold p-4 rounded-2xl flex items-center justify-center gap-2 uppercase text-[10px]"><i data-lucide="message-circle" className="w-4 h-4"></i> WhatsApp</button>
+                                                <button onClick={() => printDocument('pedido')} className="bg-slate-800 text-white font-bold p-4 rounded-2xl flex items-center justify-center gap-2 uppercase text-[10px]"><i data-lucide="download" className="w-4 h-4"></i> Guardar PDF</button>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </section>
+                        )}
+
+                        {activeTab === 'gestion' && (
+                            <section className="space-y-6">
+                                <div className="bg-slate-900 p-6 rounded-3xl text-white shadow-xl">
+                                    <h3 className="font-black mb-4 flex items-center gap-2 uppercase text-xs"><i data-lucide="printer"></i> Herramientas de Admin</h3>
+                                    <div className="flex flex-col gap-3">
+                                        <button onClick={() => printDocument('precios')} className="w-full py-4 bg-blue-600 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-blue-700 transition"><i data-lucide="file-text"></i> DESCARGAR LISTA DE PRECIOS (PDF)</button>
+                                        <button onClick={addTemporalProduct} className="w-full py-4 bg-purple-600 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-purple-700 transition"><i data-lucide="plus-circle"></i> AGREGAR PRODUCTO ESPECIAL AL PEDIDO</button>
+                                    </div>
+                                </div>
+                                <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-100">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="font-black text-orange-900 text-xs uppercase">Importación Masiva</h3>
+                                        <button onClick={clearAllProducts} className="bg-red-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-red-700 transition shadow-md"><i data-lucide="trash-2" className="inline w-3 h-3 mr-1"></i> Borrar Todo el Catálogo</button>
+                                    </div>
+                                    <textarea className="w-full h-24 p-4 rounded-2xl border mt-2 text-xs font-mono outline-none focus:border-orange-400" placeholder="Bulk: Prod [TAB] Precio [TAB] Pack" value={bulkData} onChange={e => setBulkData(e.target.value)} />
+                                    <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Excel</button>
+                                </div>
+                                <div className="bg-white border-2 border-slate-100 p-6 rounded-3xl shadow-sm">
+                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase">Agregar / Editar Producto Permanente</h3>
+                                    <form onSubmit={handleSaveProduct} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <input name="p_name" defaultValue={editingProduct?.name} placeholder="Producto" className="p-3 rounded-xl border col-span-1 md:col-span-3 outline-none focus:border-blue-400" required />
+                                        <input name="p_price" defaultValue={editingProduct?.price} placeholder="Precio" className="p-3 rounded-xl border outline-none focus:border-blue-400" required />
+                                        <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack" className="p-3 rounded-xl border outline-none focus:border-blue-400" required />
+                                        <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs">Guardar Permanente</button>
+                                    </form>
+                                </div>
+                                <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b"><tr><th className="p-4 text-left">Producto Permanente</th><th className="p-4 text-right">Acciones</th></tr></thead>
+                                        <tbody>
+                                            {/* Solo mostramos productos permanentes en la tabla de gestión */}
+                                            {products.filter(p => !p.isTemp).map(p => (
+                                                <tr key={p.id} className="border-b hover:bg-slate-50 transition"><td className="p-4 font-bold text-slate-800">{p.name}</td>
+                                                <td className="p-4 text-right space-x-3">
+                                                    <button onClick={() => { setEditingProduct(p); window.scrollTo(0,0); }} className="text-blue-600 font-bold hover:underline">Editar</button>
+                                                    <button onClick={() => deleteProduct(p.id)} className="text-red-500 font-bold hover:underline">Borrar</button>
+                                                </td></tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </section>
+                        )}
+                    </div>
+
+                    <div id="budget-pdf" className="print-template">
+                        <div>
+                            <h1>DR DISTRIBUCIONES ROSARIO</h1>
+                            <p><strong>CLIENTE:</strong> {nombre}</p>
+                            <p><strong>DIRECCIÓN:</strong> {direccion || '-'}</p>
+                            <p><strong>NOTAS:</strong> {notas || '-'}</p>
+                            <p><strong>FECHA:</strong> {new Date().toLocaleDateString()}</p>
+                            <table>
+                                <thead><tr><th>Producto</th><th style={{textAlign:'center'}}>Cant.</th><th style={{textAlign:'right'}}>Subtotal</th></tr></thead>
+                                <tbody>
+                                    {selectedItems.map(p => (
+                                        <tr key={p.id}>
+                                            <td><strong>{p.name}</strong><br/><small>$ {p.price.toLocaleString()} un. | x{p.pack}</small></td>
+                                            <td style={{textAlign:'center'}}>{cart[p.id]}</td>
+                                            <td style={{textAlign:'right'}}>$ {((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            <div className="total-box"><strong>TOTAL: $ {totalGeneral.toLocaleString()}</strong></div>
+                        </div>
+                    </div>
+
+                    <div id="price-list-pdf" className="print-template">
+                        <div>
+                            <h1>LISTA DE PRECIOS - DR DISTRIBUCIONES</h1>
+                            <p>Actualizada: {new Date().toLocaleDateString()}</p>
+                            <table>
+                                <thead><tr><th>Producto</th><th style={{textAlign:'center'}}>Pack</th><th style={{textAlign:'right'}}>Precio Unit.</th></tr></thead>
+                                <tbody>
+                                    {/* Solo listamos productos permanentes en la lista oficial de precios */}
+                                    {products.filter(p => !p.isTemp).sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                                        <tr key={p.id}><td>{p.name}</td><td style={{textAlign:'center'}}>x{p.pack}</td><td style={{textAlign:'right'}}>$ {p.price?.toLocaleString()}</td></tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
