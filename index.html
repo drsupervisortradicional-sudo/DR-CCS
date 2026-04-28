@@ -50,7 +50,7 @@
             
             const [cart, setCart] = useState(() => {
                 const saved = localStorage.getItem('dr_cart_v2');
-                return saved ? JSON.parse(saved) : {};
+                try { return saved ? JSON.parse(saved) : {}; } catch(e) { return {}; }
             });
 
             useEffect(() => {
@@ -109,15 +109,6 @@
                 setCart(prev => ({ ...prev, [tempId]: cant }));
             };
 
-            const clearAllProducts = async () => {
-                if(confirm("¡ATENCIÓN! ¿Borrar TODO el catálogo permanente?")) {
-                    const batch = db.batch();
-                    products.filter(p => !p.isTemp).forEach(p => batch.delete(db.collection("productos").doc(p.id)));
-                    await batch.commit();
-                    alert("Catálogo vaciado.");
-                }
-            };
-
             const handleSaveProduct = async (e) => {
                 e.preventDefault();
                 const form = e.target;
@@ -173,9 +164,9 @@
                             <tbody>
                                 ${selectedItems.map(p => `
                                     <tr style="border-bottom:1px solid #ddd;">
-                                        <td style="padding:10px;"><strong>${p.name}</strong><br/><small>${p.category || 'VARIOS'}</small></td>
+                                        <td style="padding:10px;"><strong>${p.name || 'Sin nombre'}</strong><br/><small>${p.category || 'VARIOS'}</small></td>
                                         <td style="padding:10px; text-align:center;">${cart[p.id]}</td>
-                                        <td style="padding:10px; text-align:right;">$ ${((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
+                                        <td style="padding:10px; text-align:right;">$ ${((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
@@ -194,9 +185,9 @@
                                 <tr style="background:#f1f5f9;"><td colspan="3" style="padding:10px; font-weight:bold;">${cat}</td></tr>
                                 ${sortedProducts.filter(p => (p.category || "VARIOS") === cat && !p.isTemp).map(p => `
                                     <tr style="border-bottom:1px solid #eee;">
-                                        <td style="padding:10px; padding-left:25px;">${p.name}</td>
-                                        <td style="padding:10px; text-align:center;">x${p.pack}</td>
-                                        <td style="padding:10px; text-align:right;">$ ${p.price.toLocaleString()}</td>
+                                        <td style="padding:10px; padding-left:25px;">${p.name || 'Sin nombre'}</td>
+                                        <td style="padding:10px; text-align:center;">x${p.pack || 1}</td>
+                                        <td style="padding:10px; text-align:right;">$ ${(p.price || 0).toLocaleString()}</td>
                                     </tr>
                                 `).join('')}
                             `).join('')}
@@ -215,6 +206,18 @@
                     iframe.contentWindow.print();
                     setTimeout(() => document.body.removeChild(iframe), 2000);
                 }, 1000);
+            };
+
+            const sendWhatsApp = () => {
+                if (!nombre) return alert("Por favor, ingresa el nombre.");
+                let msg = `*PEDIDO DR DISTRIBUCIONES*\n*Cliente:* ${nombre}\n`;
+                if(direccion) msg += `*Dirección:* ${direccion}\n`;
+                msg += `\n--------------------------\n\n`;
+                selectedItems.forEach(p => {
+                    msg += `• *${p.name}*\n  Cant: ${cart[p.id]} bultos | Subt: $${(cart[p.id] * p.price * p.pack).toLocaleString()}\n\n`;
+                });
+                msg += `*TOTAL: $${totalGeneral.toLocaleString()}*`;
+                window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
 
             return (
@@ -241,12 +244,12 @@
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 <div className="grid gap-3">
-                                    {sortedProducts.filter(p => !p.isTemp && p.name?.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+                                    {sortedProducts.filter(p => !p.isTemp && (p.name || "").toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
                                         <div key={p.id} className="p-5 border-2 border-slate-50 rounded-3xl flex flex-col md:flex-row justify-between items-center bg-white shadow-sm hover:border-blue-100 transition">
                                             <div className="flex-1 w-full">
                                                 {p.category && <span className="category-badge">{p.category}</span>}
                                                 <h3 className="font-bold text-slate-800">{p.name}</h3>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">$ {p.price?.toLocaleString()} unit. | Pack x{p.pack}</p>
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase">$ {(p.price || 0).toLocaleString()} unit. | Pack x{p.pack || 1}</p>
                                             </div>
                                             <div className="flex items-center gap-4 mt-4 md:mt-0">
                                                 <input type="number" className="w-20 p-2 border-2 rounded-xl text-center font-black text-blue-600" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
@@ -269,7 +272,7 @@
                                         <div className="bg-white border-2 rounded-3xl overflow-hidden shadow-sm">
                                             {selectedItems.map(p => (
                                                 <div key={p.id} className="flex justify-between p-4 border-b last:border-0">
-                                                    <div><p className="font-bold text-slate-800">{p.name}</p><p className="text-[10px] text-slate-500 font-bold uppercase">{cart[p.id]} bultos ($ {p.price.toLocaleString()} un.)</p></div>
+                                                    <div><p className="font-bold text-slate-800">{p.name}</p><p className="text-[10px] text-slate-500 font-bold uppercase">{cart[p.id]} bultos ($ {(p.price || 0).toLocaleString()} un.)</p></div>
                                                     <p className="font-black text-slate-900">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</p>
                                                 </div>
                                             ))}
@@ -304,7 +307,7 @@
                                 <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-100">
                                     <div className="flex justify-between items-center mb-4">
                                         <h3 className="font-black text-orange-900 text-xs uppercase">Importación Masiva (Excel)</h3>
-                                        <button onClick={clearAllProducts} className="bg-red-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-red-700 transition shadow-md"><i data-lucide="trash-2" className="inline w-3 h-3 mr-1"></i> Borrar Todo</button>
+                                        <button onClick={() => { if(confirm("¿Borrar todo?")) db.collection("productos").get().then(s => s.forEach(d => d.ref.delete())); }} className="bg-red-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-red-700 transition shadow-md"><i data-lucide="trash-2" className="inline w-3 h-3 mr-1"></i> Borrar Todo</button>
                                     </div>
                                     <textarea className="w-full h-24 p-4 rounded-2xl border mt-2 text-xs font-mono outline-none focus:border-orange-400" placeholder="Producto [TAB] Precio [TAB] Pack [TAB] Categoría" value={bulkData} onChange={e => setBulkData(e.target.value)} />
                                     <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Excel</button>
@@ -330,7 +333,7 @@
                                             <tr><th className="p-4 text-left">Producto</th><th className="p-4 text-right">Acciones</th></tr>
                                         </thead>
                                         <tbody>
-                                            {sortedProducts.filter(p => !p.isTemp && p.name?.toLowerCase().includes(adminSearch.toLowerCase())).map(p => (
+                                            {sortedProducts.filter(p => !p.isTemp && (p.name || "").toLowerCase().includes(adminSearch.toLowerCase())).map(p => (
                                                 <tr key={p.id} className="border-b hover:bg-slate-50 transition">
                                                     <td className="p-4 font-bold text-slate-800">{p.name} <br/><span className="text-[9px] text-blue-500 uppercase">{p.category || 'VARIOS'}</span></td>
                                                     <td className="p-4 text-right space-x-3">
