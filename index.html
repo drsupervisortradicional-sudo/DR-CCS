@@ -41,7 +41,7 @@
             const [products, setProducts] = useState([]);
             const [isLogged, setIsLogged] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
-            const [adminSearch, setAdminSearch] = useState(""); // Nuevo buscador Admin
+            const [adminSearch, setAdminSearch] = useState("");
             const [nombre, setNombre] = useState("");
             const [direccion, setDireccion] = useState("");
             const [notas, setNotas] = useState("");
@@ -75,7 +75,6 @@
                 return parseFloat(clean) || 0;
             };
 
-            // Lista maestra ordenada alfabéticamente
             const sortedProducts = useMemo(() => {
                 return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
             }, [products]);
@@ -110,6 +109,15 @@
                 setCart(prev => ({ ...prev, [tempId]: cant }));
             };
 
+            const clearAllProducts = async () => {
+                if(confirm("¡ATENCIÓN! ¿Borrar TODO el catálogo permanente?")) {
+                    const batch = db.batch();
+                    products.filter(p => !p.isTemp).forEach(p => batch.delete(db.collection("productos").doc(p.id)));
+                    await batch.commit();
+                    alert("Catálogo vaciado.");
+                }
+            };
+
             const handleSaveProduct = async (e) => {
                 e.preventDefault();
                 const form = e.target;
@@ -122,6 +130,26 @@
                 });
                 setEditingProduct(null);
                 form.reset();
+            };
+
+            const handleBulkImport = async () => {
+                const rows = bulkData.trim().split("\n");
+                const batch = db.batch();
+                rows.forEach(row => {
+                    const cols = row.split("\t");
+                    if (cols.length >= 3) {
+                        const id = (Date.now() + Math.random()).toString().replace(".","");
+                        batch.set(db.collection("productos").doc(id), {
+                            name: cols[0].trim(),
+                            price: parseMoney(cols[1]),
+                            pack: parseInt(cols[2]) || 1,
+                            category: (cols[3] || "VARIOS").trim().toUpperCase()
+                        });
+                    }
+                });
+                await batch.commit();
+                setBulkData("");
+                alert("Importación completada.");
             };
 
             const printDocument = (type) => {
@@ -272,16 +300,27 @@
                                         <button onClick={addTemporalProduct} className="w-full py-4 bg-purple-600 rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2"><i data-lucide="plus-circle"></i> Producto Especial (Temporal)</button>
                                     </div>
                                 </div>
+                                
+                                <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-100">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <h3 className="font-black text-orange-900 text-xs uppercase">Importación Masiva (Excel)</h3>
+                                        <button onClick={clearAllProducts} className="bg-red-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-red-700 transition shadow-md"><i data-lucide="trash-2" className="inline w-3 h-3 mr-1"></i> Borrar Todo</button>
+                                    </div>
+                                    <textarea className="w-full h-24 p-4 rounded-2xl border mt-2 text-xs font-mono outline-none focus:border-orange-400" placeholder="Producto [TAB] Precio [TAB] Pack [TAB] Categoría" value={bulkData} onChange={e => setBulkData(e.target.value)} />
+                                    <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Excel</button>
+                                </div>
+
                                 <div className="bg-white border-2 p-6 rounded-3xl shadow-sm">
-                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase">Gestionar Catálogo</h3>
+                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase">Agregar / Editar Individual</h3>
                                     <form onSubmit={handleSaveProduct} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         <input name="p_name" defaultValue={editingProduct?.name} placeholder="Producto" className="p-3 rounded-xl border col-span-1 md:col-span-2" required />
                                         <input name="p_price" defaultValue={editingProduct?.price} placeholder="Precio" className="p-3 rounded-xl border" required />
                                         <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack" className="p-3 rounded-xl border" required />
-                                        <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría (Ej: ARROZ)" className="p-3 rounded-xl border col-span-1 md:col-span-2" />
+                                        <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría" className="p-3 rounded-xl border col-span-1 md:col-span-2" />
                                         <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs md:col-span-2">Guardar Permanente</button>
                                     </form>
                                 </div>
+
                                 <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
                                     <div className="p-4 bg-slate-50 border-b">
                                         <input type="text" placeholder="Buscar en Admin..." className="w-full p-2 rounded-lg border text-sm" onChange={e => setAdminSearch(e.target.value)} />
