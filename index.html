@@ -16,6 +16,7 @@
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; }
         .print-template { display: none; }
         @media print { #root { display: none !important; } }
+        .category-badge { background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 4px; display: inline-block; }
     </style>
 </head>
 <body>
@@ -41,14 +42,13 @@
             const [products, setProducts] = useState([]);
             const [isLogged, setIsLogged] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
+            const [adminSearch, setAdminSearch] = useState("");
             const [nombre, setNombre] = useState("");
             const [direccion, setDireccion] = useState("");
             const [notas, setNotas] = useState("");
             const [editingProduct, setEditingProduct] = useState(null);
             const [bulkData, setBulkData] = useState("");
             
-            const [adminSearch, setAdminSearch] = useState("");
-
             const [cart, setCart] = useState(() => {
                 const saved = localStorage.getItem('dr_cart_v2');
                 return saved ? JSON.parse(saved) : {};
@@ -61,7 +61,6 @@
             useEffect(() => {
                 const unsubscribe = db.collection("productos").onSnapshot((snapshot) => {
                     const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // Al actualizar desde Firebase, mantenemos los temporales que ya existan
                     setProducts(prev => {
                         const temps = prev.filter(p => p.isTemp);
                         return [...prods, ...temps];
@@ -77,9 +76,13 @@
                 return parseFloat(clean) || 0;
             };
 
+            const sortedProducts = useMemo(() => {
+                return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            }, [products]);
+
             const selectedItems = useMemo(() => {
-                return products.filter(p => cart[p.id] && cart[p.id] > 0);
-            }, [products, cart]);
+                return sortedProducts.filter(p => cart[p.id] && cart[p.id] > 0);
+            }, [sortedProducts, cart]);
 
             const totalGeneral = useMemo(() => {
                 return selectedItems.reduce((acc, p) => acc + ((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)), 0);
@@ -91,7 +94,6 @@
                     setNombre("");
                     setDireccion("");
                     setNotas("");
-                    // Al vaciar el carrito, también eliminamos los productos temporales
                     setProducts(prev => prev.filter(p => !p.isTemp));
                 }
             };
@@ -100,24 +102,13 @@
                 const name = prompt("Descripción del producto:");
                 const priceInput = prompt("Precio unitario:");
                 if (!name || !priceInput) return;
-                
                 const price = parseMoney(priceInput);
                 const pack = parseInt(prompt("Unidades por bulto:")) || 1;
                 const cant = parseInt(prompt("Cantidad de bultos:")) || 1;
-
                 const tempId = "temp_" + Date.now();
-                const tempProduct = { id: tempId, name: "(ESPECIAL) " + name, price, pack, isTemp: true };
-                
+                const tempProduct = { id: tempId, name: "(ESPECIAL) " + name, price, pack, isTemp: true, category: "VARIOS" };
                 setProducts(prev => [...prev, tempProduct]);
                 setCart(prev => ({ ...prev, [tempId]: cant }));
-            };
-
-            const clearAllProducts = async () => {
-                if(confirm("¡ATENCIÓN! ¿Borrar TODO el catálogo permanente?")) {
-                    const batch = db.batch();
-                    products.filter(p => !p.isTemp).forEach(p => batch.delete(db.collection("productos").doc(p.id)));
-                    await batch.commit();
-                }
             };
 
             const handleSaveProduct = async (e) => {
@@ -128,119 +119,106 @@
                     name: form.p_name.value,
                     price: parseMoney(form.p_price.value),
                     pack: parseInt(form.p_pack.value) || 1,
-                    category: form.p_category.value.trim() || ""
+                    category: form.p_category.value.toUpperCase()
                 });
                 setEditingProduct(null);
                 form.reset();
             };
 
-            const handleBulkImport = async () => {
-                const rows = bulkData.trim().split("\n");
-                const batch = db.batch();
-                rows.forEach(row => {
-                    const cols = row.split("\t");
-                    if (cols.length >= 3) {
-                        const id = (Date.now() + Math.random()).toString().replace(".","");
-                        batch.set(db.collection("productos").doc(id), {
-                            name: cols[0].trim(),
-                            price: parseMoney(cols[1]),
-                            pack: parseInt(cols[2]) || 1
-                        });
-                    }
-                });
-                await batch.commit();
-                setBulkData("");
-                alert("Catálogo actualizado.");
-            };
-
-            const deleteProduct = async (id) => {
-                if(confirm("¿Eliminar?")) await db.collection("productos").doc(id).delete();
-            };
-
-            const sendWhatsApp = () => {
-                if (!nombre) return alert("Por favor, ingresa el nombre.");
-                let msg = `*PEDIDO DR DISTRIBUCIONES*\n*Cliente:* ${nombre}\n`;
-                if(direccion) msg += `*Dirección:* ${direccion}\n`;
-                if(notas) msg += `*Notas:* ${notas}\n`;
-                msg += `\n--------------------------\n\n`;
-                selectedItems.forEach(p => {
-                    msg += `• *${p.name}*\n  Cant: ${cart[p.id]} bultos | Subt: $${(cart[p.id] * p.price * p.pack).toLocaleString()}\n\n`;
-                });
-                msg += `*TOTAL: $${totalGeneral.toLocaleString()}*`;
-                window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
-            };
-            // Genera HTML desde el estado React (funciona en celular y PC)
             const printDocument = (type) => {
-                const commonStyles = `
-                    body { font-family: sans-serif; color: #000; padding: 20px; }
-                    h1 { font-size: 20px; margin-bottom: 4px; }
-                    p { margin: 2px 0; font-size: 13px; }
-                    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-                    th { background-color: #1e3a8a !important; color: white !important; padding: 10px 12px; text-align: left; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                    td { padding: 8px 12px; border-bottom: 1px solid #ddd; color: #000; font-size: 13px; }
-                    .category-header { background: #f1f5f9; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #475569; padding: 6px 12px; border-bottom: 1px solid #cbd5e1; }
-                    .total-box { background-color: #1e3a8a !important; color: white !important; padding: 16px 20px; text-align: right; border-radius: 8px; margin-top: 20px; font-size: 16px; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                    @media print { * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
-                `;
-
-                let bodyHtml = '';
+                // 1. Preparamos el HTML dinámicamente desde el ESTADO, no desde el DOM
+                let contentHtml = "";
+                const fecha = new Date().toLocaleDateString();
 
                 if (type === 'pedido') {
-                    const rows = selectedItems.map(p => `
-                        <tr>
-                            <td><strong>${p.name}</strong><br/><small>$ ${p.price.toLocaleString()} un. | x${p.pack}</small></td>
-                            <td style="text-align:center">${cart[p.id]}</td>
-                            <td style="text-align:right">$ ${((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
-                        </tr>`).join('');
-                    bodyHtml = `
-                        <h1>DR DISTRIBUCIONES ROSARIO</h1>
-                        <p><strong>CLIENTE:</strong> ${nombre || '-'}</p>
-                        <p><strong>DIRECCIÓN:</strong> ${direccion || '-'}</p>
-                        <p><strong>NOTAS:</strong> ${notas || '-'}</p>
-                        <p><strong>FECHA:</strong> ${new Date().toLocaleDateString()}</p>
+                    contentHtml = `
+                        <h1 style="color: #1e3a8a; margin-bottom: 5px;">DR DISTRIBUCIONES ROSARIO</h1>
+                        <p style="margin: 0;"><strong>CLIENTE:</strong> ${nombre || '---'}</p>
+                        <p style="margin: 0;"><strong>DIRECCIÓN:</strong> ${direccion || '---'}</p>
+                        <p style="margin: 0;"><strong>NOTAS:</strong> ${notas || '---'}</p>
+                        <p style="margin: 0;"><strong>FECHA:</strong> ${fecha}</p>
                         <table>
-                            <thead><tr><th>Producto</th><th style="text-align:center">Cant.</th><th style="text-align:right">Subtotal</th></tr></thead>
-                            <tbody>${rows}</tbody>
+                            <thead>
+                                <tr>
+                                    <th>Producto</th>
+                                    <th style="text-align:center">Cant.</th>
+                                    <th style="text-align:right">Subtotal</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${selectedItems.map(p => `
+                                    <tr>
+                                        <td><strong>${p.name}</strong><br/><small>${p.category || 'VARIOS'} | $ ${p.price.toLocaleString()} un.</small></td>
+                                        <td style="text-align:center">${cart[p.id]}</td>
+                                        <td style="text-align:right">$ ${((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
                         </table>
-                        <div class="total-box">TOTAL: $ ${totalGeneral.toLocaleString()}</div>`;
+                        <div class="total-box">
+                            <strong>TOTAL DEL PEDIDO: $ ${totalGeneral.toLocaleString()}</strong>
+                        </div>
+                    `;
                 } else {
-                    // Lista de precios agrupada por categoría
-                    const permanentes = products.filter(p => !p.isTemp).sort((a, b) => {
-                        const catA = a.category || 'Sin categoría';
-                        const catB = b.category || 'Sin categoría';
-                        if (catA !== catB) return catA.localeCompare(catB);
-                        return a.name.localeCompare(b.name);
-                    });
-                    let lastCat = null;
-                    let rows = '';
-                    permanentes.forEach(p => {
-                        const cat = p.category || 'Sin categoría';
-                        if (cat !== lastCat) {
-                            rows += `<tr><td colspan="3" class="category-header">${cat}</td></tr>`;
-                            lastCat = cat;
-                        }
-                        rows += `<tr><td>${p.name}</td><td style="text-align:center">x${p.pack}</td><td style="text-align:right">$ ${p.price?.toLocaleString()}</td></tr>`;
-                    });
-                    bodyHtml = `
-                        <h1>LISTA DE PRECIOS — DR DISTRIBUCIONES</h1>
-                        <p>Actualizada: ${new Date().toLocaleDateString()}</p>
+                    // Generación dinámica de Lista de Precios
+                    const categories = [...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category))].sort();
+                    contentHtml = `
+                        <h1 style="color: #1e3a8a;">LISTA DE PRECIOS OFICIAL</h1>
+                        <p><strong>DR DISTRIBUCIONES ROSARIO</strong> | Fecha: ${fecha}</p>
                         <table>
-                            <thead><tr><th>Producto</th><th style="text-align:center">Pack</th><th style="text-align:right">Precio Unit.</th></tr></thead>
-                            <tbody>${rows}</tbody>
-                        </table>`;
+                            <thead>
+                                <tr>
+                                    <th>Producto</th>
+                                    <th style="text-align:center">Pack</th>
+                                    <th style="text-align:right">Precio Unit.</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${categories.map(cat => `
+                                    <tr style="background: #f1f5f9; font-weight: bold;">
+                                        <td colspan="3" style="padding: 8px;">${cat || "VARIOS"}</td>
+                                    </tr>
+                                    ${sortedProducts.filter(p => p.category === cat && !p.isTemp).map(p => `
+                                        <tr>
+                                            <td style="padding-left: 20px;">${p.name}</td>
+                                            <td style="text-align:center">x${p.pack}</td>
+                                            <td style="text-align:right">$ ${p.price?.toLocaleString()}</td>
+                                        </tr>
+                                    `).join('')}
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    `;
                 }
 
+                // 2. Proceso de impresión con Iframe (sin depender de divs ocultos)
                 const iframe = document.createElement('iframe');
                 Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0', visibility: 'hidden' });
                 document.body.appendChild(iframe);
+                
                 const doc = iframe.contentWindow.document;
-                doc.write(`<html><head><title>DR Distribuciones</title><style>${commonStyles}</style></head><body>${bodyHtml}</body></html>`);
+                doc.write(`
+                    <html>
+                        <head>
+                            <style>
+                                body { font-family: sans-serif; color: #000; padding: 20px; line-height: 1.4; }
+                                table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+                                th { background-color: #1e3a8a !important; color: white !important; padding: 10px; text-align: left; -webkit-print-color-adjust: exact; }
+                                td { padding: 8px; border-bottom: 1px solid #ccc; color: #000; font-size: 13px; }
+                                .total-box { background-color: #1e3a8a !important; color: white !important; padding: 15px; text-align: right; border-radius: 8px; -webkit-print-color-adjust: exact; margin-top: 20px; font-size: 18px; }
+                                @media print { * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
+                            </style>
+                        </head>
+                        <body>${contentHtml}</body>
+                    </html>
+                `);
                 doc.close();
+
                 setTimeout(() => {
                     iframe.contentWindow.focus();
                     iframe.contentWindow.print();
-                    setTimeout(() => document.body.removeChild(iframe), 1000);
-                }, 500);
+                    setTimeout(() => document.body.removeChild(iframe), 2000);
+                }, 800);
             };
 
             return (
@@ -265,35 +243,21 @@
                                     <div><h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1><p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p></div>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
-                                {(() => {
-                                    const filtered = products.filter(p => !p.isTemp && p.name?.toLowerCase().includes(searchTerm.toLowerCase()));
-                                    const grouped = filtered.reduce((acc, p) => {
-                                        const cat = p.category || 'Sin categoría';
-                                        if (!acc[cat]) acc[cat] = [];
-                                        acc[cat].push(p);
-                                        return acc;
-                                    }, {});
-                                    const sortedCats = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
-                                    return sortedCats.map(cat => (
-                                        <div key={cat} className="mb-6">
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{cat}</span>
-                                                <div className="flex-1 h-px bg-slate-100"></div>
+                                <div className="grid gap-3">
+                                    {sortedProducts.filter(p => !p.isTemp && p.name?.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+                                        <div key={p.id} className="p-5 border-2 border-slate-50 rounded-3xl flex flex-col md:flex-row justify-between items-center bg-white shadow-sm hover:border-blue-100 transition">
+                                            <div className="flex-1 w-full">
+                                                {p.category && <span className="category-badge">{p.category}</span>}
+                                                <h3 className="font-bold text-slate-800">{p.name}</h3>
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase">$ {p.price?.toLocaleString()} unit. | Pack x{p.pack}</p>
                                             </div>
-                                            <div className="grid gap-3">
-                                                {grouped[cat].sort((a,b) => a.name.localeCompare(b.name)).map(p => (
-                                                    <div key={p.id} className="p-5 border-2 border-slate-50 rounded-3xl flex flex-col md:flex-row justify-between items-center bg-white shadow-sm hover:border-blue-100 transition">
-                                                        <div className="flex-1 w-full"><h3 className="font-bold text-slate-800">{p.name}</h3><p className="text-[10px] text-slate-400 font-bold uppercase">$ {p.price?.toLocaleString()} unit. | Pack x{p.pack}</p></div>
-                                                        <div className="flex items-center gap-4 mt-4 md:mt-0">
-                                                            <input type="number" className="w-20 p-2 border-2 rounded-xl text-center font-black text-blue-600" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
-                                                            <span className="font-black text-slate-900 w-28 text-right">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</span>
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                            <div className="flex items-center gap-4 mt-4 md:mt-0">
+                                                <input type="number" className="w-20 p-2 border-2 rounded-xl text-center font-black text-blue-600" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                                <span className="font-black text-slate-900 w-28 text-right">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</span>
                                             </div>
                                         </div>
-                                    ));
-                                })()}
+                                    ))}
+                                </div>
                             </section>
                         )}
 
@@ -339,38 +303,29 @@
                                         <button onClick={addTemporalProduct} className="w-full py-4 bg-purple-600 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-purple-700 transition"><i data-lucide="plus-circle"></i> AGREGAR PRODUCTO ESPECIAL AL PEDIDO</button>
                                     </div>
                                 </div>
-                                <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-100">
-                                    <div className="flex justify-between items-center mb-4">
-                                        <h3 className="font-black text-orange-900 text-xs uppercase">Importación Masiva</h3>
-                                        <button onClick={clearAllProducts} className="bg-red-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-red-700 transition shadow-md"><i data-lucide="trash-2" className="inline w-3 h-3 mr-1"></i> Borrar Todo el Catálogo</button>
-                                    </div>
-                                    <textarea className="w-full h-24 p-4 rounded-2xl border mt-2 text-xs font-mono outline-none focus:border-orange-400" placeholder="Bulk: Prod [TAB] Precio [TAB] Pack" value={bulkData} onChange={e => setBulkData(e.target.value)} />
-                                    <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Excel</button>
-                                </div>
                                 <div className="bg-white border-2 border-slate-100 p-6 rounded-3xl shadow-sm">
                                     <h3 className="font-black text-slate-800 mb-4 text-xs uppercase">Agregar / Editar Producto Permanente</h3>
-                                    <form onSubmit={handleSaveProduct} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                        <input name="p_name" defaultValue={editingProduct?.name} placeholder="Producto" className="p-3 rounded-xl border col-span-1 md:col-span-3 outline-none focus:border-blue-400" required />
-                                        <input name="p_price" defaultValue={editingProduct?.price} placeholder="Precio" className="p-3 rounded-xl border outline-none focus:border-blue-400" required />
-                                        <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack" className="p-3 rounded-xl border outline-none focus:border-blue-400" required />
-                                        <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría (ej: Arroz)" className="p-3 rounded-xl border outline-none focus:border-blue-400 col-span-1 md:col-span-3" />
-                                        <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs col-span-1 md:col-span-3">Guardar Permanente</button>
+                                    <form onSubmit={handleSaveProduct} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <input name="p_name" defaultValue={editingProduct?.name} placeholder="Producto (Nombre)" className="p-3 rounded-xl border col-span-1 md:col-span-2" required />
+                                        <input name="p_price" defaultValue={editingProduct?.price} placeholder="Precio" className="p-3 rounded-xl border" required />
+                                        <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack x Unidades" className="p-3 rounded-xl border" required />
+                                        <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría (Ej: ARROZ, HARINAS)" className="p-3 rounded-xl border col-span-1 md:col-span-2" required />
+                                        <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs md:col-span-2">Guardar Permanente</button>
                                     </form>
                                 </div>
                                 <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
-                                    <div className="p-4 border-b">
-                                        <input type="text" placeholder="Buscar producto en el catálogo..." className="w-full p-3 bg-slate-50 rounded-xl border outline-none focus:border-blue-400 text-sm" value={adminSearch} onChange={e => setAdminSearch(e.target.value)} />
+                                    <div className="p-4 bg-slate-50 border-b">
+                                        <input type="text" placeholder="Buscar en Admin..." className="w-full p-2 rounded-lg border text-sm" onChange={e => setAdminSearch(e.target.value)} />
                                     </div>
                                     <table className="w-full text-sm">
-                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b"><tr><th className="p-4 text-left">Producto Permanente</th><th className="p-4 text-left text-slate-300">Categoría</th><th className="p-4 text-right">Acciones</th></tr></thead>
+                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b"><tr><th className="p-4 text-left">Producto</th><th className="p-4 text-right">Acciones</th></tr></thead>
                                         <tbody>
-                                            {products.filter(p => !p.isTemp && p.name?.toLowerCase().includes(adminSearch.toLowerCase())).sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                                            {sortedProducts.filter(p => !p.isTemp && p.name?.toLowerCase().includes(adminSearch.toLowerCase())).map(p => (
                                                 <tr key={p.id} className="border-b hover:bg-slate-50 transition">
-                                                    <td className="p-4 font-bold text-slate-800">{p.name}</td>
-                                                    <td className="p-4 text-xs text-slate-400">{p.category || '—'}</td>
+                                                    <td className="p-4 font-bold text-slate-800">{p.name} <br/><span className="text-[9px] text-blue-500">{p.category}</span></td>
                                                     <td className="p-4 text-right space-x-3">
                                                         <button onClick={() => { setEditingProduct(p); window.scrollTo(0,0); }} className="text-blue-600 font-bold hover:underline">Editar</button>
-                                                        <button onClick={() => deleteProduct(p.id)} className="text-red-500 font-bold hover:underline">Borrar</button>
+                                                        <button onClick={() => { if(confirm("¿Eliminar?")) db.collection("productos").doc(p.id).delete(); }} className="text-red-500 font-bold hover:underline">Borrar</button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -381,6 +336,41 @@
                         )}
                     </div>
 
+                    {/* PDF TEMPLATES: Agrupados por categoría y ordenados alfabéticamente */}
+                    <div id="budget-pdf" className="print-template">
+                        <h1>DR DISTRIBUCIONES ROSARIO</h1>
+                        <p><strong>CLIENTE:</strong> {nombre}</p>
+                        <table>
+                            <thead><tr><th>Producto</th><th style={{textAlign:'center'}}>Cant.</th><th style={{textAlign:'right'}}>Subtotal</th></tr></thead>
+                            <tbody>
+                                {selectedItems.map(p => (
+                                    <tr key={p.id}>
+                                        <td><strong>{p.name}</strong><br/><small>{p.category} | $ {p.price.toLocaleString()} un.</small></td>
+                                        <td style={{textAlign:'center'}}>{cart[p.id]}</td>
+                                        <td style={{textAlign:'right'}}>$ {((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        <div className="total-box"><strong>TOTAL: $ {totalGeneral.toLocaleString()}</strong></div>
+                    </div>
+
+                    <div id="price-list-pdf" className="print-template">
+                        <h1>LISTA DE PRECIOS - DR DISTRIBUCIONES</h1>
+                        <table>
+                            <thead><tr><th>Categoría</th><th>Producto</th><th style={{textAlign:'right'}}>Precio Unit.</th></tr></thead>
+                            <tbody>
+                                {[...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category))].sort().map(cat => (
+                                    <React.Fragment key={cat}>
+                                        <tr className="cat-row"><td colSpan="3">{cat || "SIN CATEGORÍA"}</td></tr>
+                                        {sortedProducts.filter(p => p.category === cat && !p.isTemp).map(p => (
+                                            <tr key={p.id}><td></td><td>{p.name} (x{p.pack})</td><td style={{textAlign:'right'}}>$ {p.price?.toLocaleString()}</td></tr>
+                                        ))}
+                                    </React.Fragment>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             );
         };
