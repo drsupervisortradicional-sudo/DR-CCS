@@ -152,7 +152,7 @@
                 if (type === 'pedido') {
                     bodyContent = `
                         <div style="font-family: sans-serif; padding: 10px;">
-                            <h1 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">DR DISTRIBUCIONES ROSARIO</h1>
+                            <h1 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">CCS - COMEDORES</h1>
                             <div style="margin: 20px 0;">
                                 <p><strong>CLIENTE:</strong> ${nombre || '---'}</p>
                                 <p><strong>DIRECCIÓN:</strong> ${direccion || '---'}</p>
@@ -188,8 +188,8 @@
                     const categories = [...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category || "VARIOS"))].sort();
                     bodyContent = `
                         <div style="font-family: sans-serif; padding: 10px;">
-                            <h1 style="color: #1e3a8a; text-align: center;">LISTA DE PRECIOS OFICIAL</h1>
-                            <p style="text-align: center;">DR DISTRIBUCIONES ROSARIO | ${fecha}</p>
+                            <h1 style="color: #1e3a8a; text-align: center;">LISTA DE PRECIOS</h1>
+                            <p style="text-align: center;">CCS - COMEDORES | ${fecha}</p>
                             <table style="width:100%; border-collapse:collapse;">
                                 ${categories.map(cat => `
                                     <tr style="background:#f1f5f9;"><td colspan="3" style="padding:10px; font-weight:bold; border:1px solid #ddd;">${cat}</td></tr>
