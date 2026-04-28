@@ -47,6 +47,8 @@
             const [editingProduct, setEditingProduct] = useState(null);
             const [bulkData, setBulkData] = useState("");
             
+            const [adminSearch, setAdminSearch] = useState("");
+
             const [cart, setCart] = useState(() => {
                 const saved = localStorage.getItem('dr_cart_v2');
                 return saved ? JSON.parse(saved) : {};
@@ -125,7 +127,8 @@
                 await db.collection("productos").doc(id).set({
                     name: form.p_name.value,
                     price: parseMoney(form.p_price.value),
-                    pack: parseInt(form.p_pack.value) || 1
+                    pack: parseInt(form.p_pack.value) || 1,
+                    category: form.p_category.value.trim() || ""
                 });
                 setEditingProduct(null);
                 form.reset();
@@ -166,51 +169,76 @@
                 msg += `*TOTAL: $${totalGeneral.toLocaleString()}*`;
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
-            // Versión compatible con Celulares (Usa Iframe invisible)
+            // Genera HTML desde el estado React (funciona en celular y PC)
             const printDocument = (type) => {
-                const element = document.getElementById(type === 'pedido' ? 'budget-pdf' : 'price-list-pdf');
-                if (!element) return;
+                const commonStyles = `
+                    body { font-family: sans-serif; color: #000; padding: 20px; }
+                    h1 { font-size: 20px; margin-bottom: 4px; }
+                    p { margin: 2px 0; font-size: 13px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                    th { background-color: #1e3a8a !important; color: white !important; padding: 10px 12px; text-align: left; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                    td { padding: 8px 12px; border-bottom: 1px solid #ddd; color: #000; font-size: 13px; }
+                    .category-header { background: #f1f5f9; font-weight: bold; font-size: 11px; text-transform: uppercase; color: #475569; padding: 6px 12px; border-bottom: 1px solid #cbd5e1; }
+                    .total-box { background-color: #1e3a8a !important; color: white !important; padding: 16px 20px; text-align: right; border-radius: 8px; margin-top: 20px; font-size: 16px; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                    @media print { * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
+                `;
 
-                // 1. Creamos un Iframe temporal e invisible
+                let bodyHtml = '';
+
+                if (type === 'pedido') {
+                    const rows = selectedItems.map(p => `
+                        <tr>
+                            <td><strong>${p.name}</strong><br/><small>$ ${p.price.toLocaleString()} un. | x${p.pack}</small></td>
+                            <td style="text-align:center">${cart[p.id]}</td>
+                            <td style="text-align:right">$ ${((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
+                        </tr>`).join('');
+                    bodyHtml = `
+                        <h1>DR DISTRIBUCIONES ROSARIO</h1>
+                        <p><strong>CLIENTE:</strong> ${nombre || '-'}</p>
+                        <p><strong>DIRECCIÓN:</strong> ${direccion || '-'}</p>
+                        <p><strong>NOTAS:</strong> ${notas || '-'}</p>
+                        <p><strong>FECHA:</strong> ${new Date().toLocaleDateString()}</p>
+                        <table>
+                            <thead><tr><th>Producto</th><th style="text-align:center">Cant.</th><th style="text-align:right">Subtotal</th></tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                        <div class="total-box">TOTAL: $ ${totalGeneral.toLocaleString()}</div>`;
+                } else {
+                    // Lista de precios agrupada por categoría
+                    const permanentes = products.filter(p => !p.isTemp).sort((a, b) => {
+                        const catA = a.category || 'Sin categoría';
+                        const catB = b.category || 'Sin categoría';
+                        if (catA !== catB) return catA.localeCompare(catB);
+                        return a.name.localeCompare(b.name);
+                    });
+                    let lastCat = null;
+                    let rows = '';
+                    permanentes.forEach(p => {
+                        const cat = p.category || 'Sin categoría';
+                        if (cat !== lastCat) {
+                            rows += `<tr><td colspan="3" class="category-header">${cat}</td></tr>`;
+                            lastCat = cat;
+                        }
+                        rows += `<tr><td>${p.name}</td><td style="text-align:center">x${p.pack}</td><td style="text-align:right">$ ${p.price?.toLocaleString()}</td></tr>`;
+                    });
+                    bodyHtml = `
+                        <h1>LISTA DE PRECIOS — DR DISTRIBUCIONES</h1>
+                        <p>Actualizada: ${new Date().toLocaleDateString()}</p>
+                        <table>
+                            <thead><tr><th>Producto</th><th style="text-align:center">Pack</th><th style="text-align:right">Precio Unit.</th></tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table>`;
+                }
+
                 const iframe = document.createElement('iframe');
-                Object.assign(iframe.style, {
-                    position: 'fixed',
-                    right: '0',
-                    bottom: '0',
-                    width: '0',
-                    height: '0',
-                    border: '0',
-                    visibility: 'hidden'
-                });
+                Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0', visibility: 'hidden' });
                 document.body.appendChild(iframe);
-
-                // 2. Escribimos el contenido en el Iframe
                 const doc = iframe.contentWindow.document;
-                doc.write(`
-                    <html>
-                        <head>
-                            <title>DR Distribuciones</title>
-                            <style>
-                                body { font-family: sans-serif; color: #000; padding: 20px; }
-                                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                                th { background-color: #1e3a8a !important; color: white !important; padding: 12px; text-align: left; -webkit-print-color-adjust: exact; }
-                                td { padding: 10px; border-bottom: 1px solid #000; color: #000; }
-                                .total-box { background-color: #1e3a8a !important; color: white !important; padding: 20px; text-align: right; border-radius: 10px; -webkit-print-color-adjust: exact; margin-top: 20px; }
-                                @media print { * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
-                            </style>
-                        </head>
-                        <body>
-                            ${element.innerHTML}
-                        </body>
-                    </html>
-                `);
+                doc.write(`<html><head><title>DR Distribuciones</title><style>${commonStyles}</style></head><body>${bodyHtml}</body></html>`);
                 doc.close();
-
-                // 3. Lanzamos la impresión
                 setTimeout(() => {
                     iframe.contentWindow.focus();
                     iframe.contentWindow.print();
-                    // Limpieza: eliminamos el iframe después de imprimir
                     setTimeout(() => document.body.removeChild(iframe), 1000);
                 }, 500);
             };
@@ -237,18 +265,35 @@
                                     <div><h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1><p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p></div>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
-                                <div className="grid gap-3">
-                                    {/* CAMBIO CLAVE: Solo mostramos productos que NO sean temporales */}
-                                    {products.filter(p => !p.isTemp && p.name?.toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
-                                        <div key={p.id} className="p-5 border-2 border-slate-50 rounded-3xl flex flex-col md:flex-row justify-between items-center bg-white shadow-sm hover:border-blue-100 transition">
-                                            <div className="flex-1 w-full"><h3 className="font-bold text-slate-800">{p.name}</h3><p className="text-[10px] text-slate-400 font-bold uppercase">$ {p.price?.toLocaleString()} unit. | Pack x{p.pack}</p></div>
-                                            <div className="flex items-center gap-4 mt-4 md:mt-0">
-                                                <input type="number" className="w-20 p-2 border-2 rounded-xl text-center font-black text-blue-600" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
-                                                <span className="font-black text-slate-900 w-28 text-right">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</span>
+                                {(() => {
+                                    const filtered = products.filter(p => !p.isTemp && p.name?.toLowerCase().includes(searchTerm.toLowerCase()));
+                                    const grouped = filtered.reduce((acc, p) => {
+                                        const cat = p.category || 'Sin categoría';
+                                        if (!acc[cat]) acc[cat] = [];
+                                        acc[cat].push(p);
+                                        return acc;
+                                    }, {});
+                                    const sortedCats = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
+                                    return sortedCats.map(cat => (
+                                        <div key={cat} className="mb-6">
+                                            <div className="flex items-center gap-3 mb-3">
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{cat}</span>
+                                                <div className="flex-1 h-px bg-slate-100"></div>
+                                            </div>
+                                            <div className="grid gap-3">
+                                                {grouped[cat].sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                                                    <div key={p.id} className="p-5 border-2 border-slate-50 rounded-3xl flex flex-col md:flex-row justify-between items-center bg-white shadow-sm hover:border-blue-100 transition">
+                                                        <div className="flex-1 w-full"><h3 className="font-bold text-slate-800">{p.name}</h3><p className="text-[10px] text-slate-400 font-bold uppercase">$ {p.price?.toLocaleString()} unit. | Pack x{p.pack}</p></div>
+                                                        <div className="flex items-center gap-4 mt-4 md:mt-0">
+                                                            <input type="number" className="w-20 p-2 border-2 rounded-xl text-center font-black text-blue-600" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                                            <span className="font-black text-slate-900 w-28 text-right">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
-                                    ))}
-                                </div>
+                                    ));
+                                })()}
                             </section>
                         )}
 
@@ -308,20 +353,26 @@
                                         <input name="p_name" defaultValue={editingProduct?.name} placeholder="Producto" className="p-3 rounded-xl border col-span-1 md:col-span-3 outline-none focus:border-blue-400" required />
                                         <input name="p_price" defaultValue={editingProduct?.price} placeholder="Precio" className="p-3 rounded-xl border outline-none focus:border-blue-400" required />
                                         <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack" className="p-3 rounded-xl border outline-none focus:border-blue-400" required />
-                                        <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs">Guardar Permanente</button>
+                                        <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría (ej: Arroz)" className="p-3 rounded-xl border outline-none focus:border-blue-400 col-span-1 md:col-span-3" />
+                                        <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs col-span-1 md:col-span-3">Guardar Permanente</button>
                                     </form>
                                 </div>
                                 <div className="bg-white border rounded-3xl overflow-hidden shadow-sm">
+                                    <div className="p-4 border-b">
+                                        <input type="text" placeholder="Buscar producto en el catálogo..." className="w-full p-3 bg-slate-50 rounded-xl border outline-none focus:border-blue-400 text-sm" value={adminSearch} onChange={e => setAdminSearch(e.target.value)} />
+                                    </div>
                                     <table className="w-full text-sm">
-                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b"><tr><th className="p-4 text-left">Producto Permanente</th><th className="p-4 text-right">Acciones</th></tr></thead>
+                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b"><tr><th className="p-4 text-left">Producto Permanente</th><th className="p-4 text-left text-slate-300">Categoría</th><th className="p-4 text-right">Acciones</th></tr></thead>
                                         <tbody>
-                                            {/* Solo mostramos productos permanentes en la tabla de gestión */}
-                                            {products.filter(p => !p.isTemp).map(p => (
-                                                <tr key={p.id} className="border-b hover:bg-slate-50 transition"><td className="p-4 font-bold text-slate-800">{p.name}</td>
-                                                <td className="p-4 text-right space-x-3">
-                                                    <button onClick={() => { setEditingProduct(p); window.scrollTo(0,0); }} className="text-blue-600 font-bold hover:underline">Editar</button>
-                                                    <button onClick={() => deleteProduct(p.id)} className="text-red-500 font-bold hover:underline">Borrar</button>
-                                                </td></tr>
+                                            {products.filter(p => !p.isTemp && p.name?.toLowerCase().includes(adminSearch.toLowerCase())).sort((a,b) => a.name.localeCompare(b.name)).map(p => (
+                                                <tr key={p.id} className="border-b hover:bg-slate-50 transition">
+                                                    <td className="p-4 font-bold text-slate-800">{p.name}</td>
+                                                    <td className="p-4 text-xs text-slate-400">{p.category || '—'}</td>
+                                                    <td className="p-4 text-right space-x-3">
+                                                        <button onClick={() => { setEditingProduct(p); window.scrollTo(0,0); }} className="text-blue-600 font-bold hover:underline">Editar</button>
+                                                        <button onClick={() => deleteProduct(p.id)} className="text-red-500 font-bold hover:underline">Borrar</button>
+                                                    </td>
+                                                </tr>
                                             ))}
                                         </tbody>
                                     </table>
@@ -330,44 +381,6 @@
                         )}
                     </div>
 
-                    <div id="budget-pdf" className="print-template">
-                        <div>
-                            <h1>DR DISTRIBUCIONES ROSARIO</h1>
-                            <p><strong>CLIENTE:</strong> {nombre}</p>
-                            <p><strong>DIRECCIÓN:</strong> {direccion || '-'}</p>
-                            <p><strong>NOTAS:</strong> {notas || '-'}</p>
-                            <p><strong>FECHA:</strong> {new Date().toLocaleDateString()}</p>
-                            <table>
-                                <thead><tr><th>Producto</th><th style={{textAlign:'center'}}>Cant.</th><th style={{textAlign:'right'}}>Subtotal</th></tr></thead>
-                                <tbody>
-                                    {selectedItems.map(p => (
-                                        <tr key={p.id}>
-                                            <td><strong>{p.name}</strong><br/><small>$ {p.price.toLocaleString()} un. | x{p.pack}</small></td>
-                                            <td style={{textAlign:'center'}}>{cart[p.id]}</td>
-                                            <td style={{textAlign:'right'}}>$ {((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            <div className="total-box"><strong>TOTAL: $ {totalGeneral.toLocaleString()}</strong></div>
-                        </div>
-                    </div>
-
-                    <div id="price-list-pdf" className="print-template">
-                        <div>
-                            <h1>LISTA DE PRECIOS - DR DISTRIBUCIONES</h1>
-                            <p>Actualizada: {new Date().toLocaleDateString()}</p>
-                            <table>
-                                <thead><tr><th>Producto</th><th style={{textAlign:'center'}}>Pack</th><th style={{textAlign:'right'}}>Precio Unit.</th></tr></thead>
-                                <tbody>
-                                    {/* Solo listamos productos permanentes en la lista oficial de precios */}
-                                    {products.filter(p => !p.isTemp).sort((a,b) => a.name.localeCompare(b.name)).map(p => (
-                                        <tr key={p.id}><td>{p.name}</td><td style={{textAlign:'center'}}>x{p.pack}</td><td style={{textAlign:'right'}}>$ {p.price?.toLocaleString()}</td></tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
                 </div>
             );
         };
