@@ -14,9 +14,8 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; }
-        .print-template { display: none; }
-        @media print { #root { display: none !important; } }
         .category-badge { background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 4px; display: inline-block; }
+        @media print { #root { display: none !important; } }
     </style>
 </head>
 <body>
@@ -42,7 +41,7 @@
             const [products, setProducts] = useState([]);
             const [isLogged, setIsLogged] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
-            const [adminSearch, setAdminSearch] = useState("");
+            const [adminSearch, setAdminSearch] = useState(""); // Nuevo buscador Admin
             const [nombre, setNombre] = useState("");
             const [direccion, setDireccion] = useState("");
             const [notas, setNotas] = useState("");
@@ -76,6 +75,7 @@
                 return parseFloat(clean) || 0;
             };
 
+            // Lista maestra ordenada alfabéticamente
             const sortedProducts = useMemo(() => {
                 return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
             }, [products]);
@@ -106,8 +106,7 @@
                 const pack = parseInt(prompt("Unidades por bulto:")) || 1;
                 const cant = parseInt(prompt("Cantidad de bultos:")) || 1;
                 const tempId = "temp_" + Date.now();
-                const tempProduct = { id: tempId, name: "(ESPECIAL) " + name, price, pack, isTemp: true, category: "VARIOS" };
-                setProducts(prev => [...prev, tempProduct]);
+                setProducts(prev => [...prev, { id: tempId, name: "(ESPECIAL) " + name, price, pack, isTemp: true, category: "ESPECIALES" }]);
                 setCart(prev => ({ ...prev, [tempId]: cant }));
             };
 
@@ -119,106 +118,75 @@
                     name: form.p_name.value,
                     price: parseMoney(form.p_price.value),
                     pack: parseInt(form.p_pack.value) || 1,
-                    category: form.p_category.value.toUpperCase()
+                    category: (form.p_category.value || "VARIOS").toUpperCase()
                 });
                 setEditingProduct(null);
                 form.reset();
             };
 
             const printDocument = (type) => {
-                // 1. Preparamos el HTML dinámicamente desde el ESTADO, no desde el DOM
                 let contentHtml = "";
                 const fecha = new Date().toLocaleDateString();
 
                 if (type === 'pedido') {
                     contentHtml = `
                         <h1 style="color: #1e3a8a; margin-bottom: 5px;">DR DISTRIBUCIONES ROSARIO</h1>
-                        <p style="margin: 0;"><strong>CLIENTE:</strong> ${nombre || '---'}</p>
-                        <p style="margin: 0;"><strong>DIRECCIÓN:</strong> ${direccion || '---'}</p>
-                        <p style="margin: 0;"><strong>NOTAS:</strong> ${notas || '---'}</p>
-                        <p style="margin: 0;"><strong>FECHA:</strong> ${fecha}</p>
-                        <table>
+                        <p><strong>CLIENTE:</strong> ${nombre || '---'}</p>
+                        <p><strong>DIRECCIÓN:</strong> ${direccion || '---'}</p>
+                        <p><strong>FECHA:</strong> ${fecha}</p>
+                        <table style="width:100%; border-collapse:collapse; margin-top:20px;">
                             <thead>
-                                <tr>
-                                    <th>Producto</th>
-                                    <th style="text-align:center">Cant.</th>
-                                    <th style="text-align:right">Subtotal</th>
+                                <tr style="background:#1e3a8a; color:white;">
+                                    <th style="padding:10px; text-align:left;">Producto</th>
+                                    <th style="padding:10px; text-align:center;">Cant.</th>
+                                    <th style="padding:10px; text-align:right;">Subtotal</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 ${selectedItems.map(p => `
-                                    <tr>
-                                        <td><strong>${p.name}</strong><br/><small>${p.category || 'VARIOS'} | $ ${p.price.toLocaleString()} un.</small></td>
-                                        <td style="text-align:center">${cart[p.id]}</td>
-                                        <td style="text-align:right">$ ${((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
+                                    <tr style="border-bottom:1px solid #ddd;">
+                                        <td style="padding:10px;"><strong>${p.name}</strong><br/><small>${p.category || 'VARIOS'}</small></td>
+                                        <td style="padding:10px; text-align:center;">${cart[p.id]}</td>
+                                        <td style="padding:10px; text-align:right;">$ ${((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
                                     </tr>
                                 `).join('')}
                             </tbody>
                         </table>
-                        <div class="total-box">
-                            <strong>TOTAL DEL PEDIDO: $ ${totalGeneral.toLocaleString()}</strong>
+                        <div style="background:#1e3a8a; color:white; padding:20px; text-align:right; margin-top:20px; border-radius:10px;">
+                            <strong>TOTAL: $ ${totalGeneral.toLocaleString()}</strong>
                         </div>
                     `;
                 } else {
-                    // Generación dinámica de Lista de Precios
-                    const categories = [...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category))].sort();
+                    const categories = [...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category || "VARIOS"))].sort();
                     contentHtml = `
                         <h1 style="color: #1e3a8a;">LISTA DE PRECIOS OFICIAL</h1>
-                        <p><strong>DR DISTRIBUCIONES ROSARIO</strong> | Fecha: ${fecha}</p>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Producto</th>
-                                    <th style="text-align:center">Pack</th>
-                                    <th style="text-align:right">Precio Unit.</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${categories.map(cat => `
-                                    <tr style="background: #f1f5f9; font-weight: bold;">
-                                        <td colspan="3" style="padding: 8px;">${cat || "VARIOS"}</td>
+                        <p><strong>DR DISTRIBUCIONES ROSARIO</strong> | ${fecha}</p>
+                        <table style="width:100%; border-collapse:collapse; margin-top:20px;">
+                            ${categories.map(cat => `
+                                <tr style="background:#f1f5f9;"><td colspan="3" style="padding:10px; font-weight:bold;">${cat}</td></tr>
+                                ${sortedProducts.filter(p => (p.category || "VARIOS") === cat && !p.isTemp).map(p => `
+                                    <tr style="border-bottom:1px solid #eee;">
+                                        <td style="padding:10px; padding-left:25px;">${p.name}</td>
+                                        <td style="padding:10px; text-align:center;">x${p.pack}</td>
+                                        <td style="padding:10px; text-align:right;">$ ${p.price.toLocaleString()}</td>
                                     </tr>
-                                    ${sortedProducts.filter(p => p.category === cat && !p.isTemp).map(p => `
-                                        <tr>
-                                            <td style="padding-left: 20px;">${p.name}</td>
-                                            <td style="text-align:center">x${p.pack}</td>
-                                            <td style="text-align:right">$ ${p.price?.toLocaleString()}</td>
-                                        </tr>
-                                    `).join('')}
                                 `).join('')}
-                            </tbody>
+                            `).join('')}
                         </table>
                     `;
                 }
 
-                // 2. Proceso de impresión con Iframe (sin depender de divs ocultos)
                 const iframe = document.createElement('iframe');
                 Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0', visibility: 'hidden' });
                 document.body.appendChild(iframe);
-                
                 const doc = iframe.contentWindow.document;
-                doc.write(`
-                    <html>
-                        <head>
-                            <style>
-                                body { font-family: sans-serif; color: #000; padding: 20px; line-height: 1.4; }
-                                table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-                                th { background-color: #1e3a8a !important; color: white !important; padding: 10px; text-align: left; -webkit-print-color-adjust: exact; }
-                                td { padding: 8px; border-bottom: 1px solid #ccc; color: #000; font-size: 13px; }
-                                .total-box { background-color: #1e3a8a !important; color: white !important; padding: 15px; text-align: right; border-radius: 8px; -webkit-print-color-adjust: exact; margin-top: 20px; font-size: 18px; }
-                                @media print { * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; } }
-                            </style>
-                        </head>
-                        <body>${contentHtml}</body>
-                    </html>
-                `);
+                doc.write(`<html><head><style>body{font-family:sans-serif;padding:20px;} th{-webkit-print-color-adjust:exact;}</style></head><body>${contentHtml}</body></html>`);
                 doc.close();
-
                 setTimeout(() => {
                     iframe.contentWindow.focus();
                     iframe.contentWindow.print();
                     setTimeout(() => document.body.removeChild(iframe), 2000);
-                }, 800);
+                }, 1000);
             };
 
             return (
@@ -239,8 +207,9 @@
                     <div className="p-6 md:p-10 flex-1">
                         {activeTab === 'catalogo' && (
                             <section>
-                                <div className="flex justify-between items-center mb-8">
-                                    <div><h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1><p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p></div>
+                                <div className="mb-8">
+                                    <h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 <div className="grid gap-3">
@@ -281,9 +250,9 @@
                                             </div>
                                         </div>
                                         <div className="grid grid-cols-1 gap-4">
-                                            <input type="text" placeholder="Nombre del Cliente / Local" className="p-4 bg-slate-50 rounded-2xl border outline-none focus:border-blue-400" value={nombre} onChange={e => setNombre(e.target.value)} />
-                                            <input type="text" placeholder="Dirección de entrega" className="p-4 bg-slate-50 rounded-2xl border outline-none focus:border-blue-400" value={direccion} onChange={e => setDireccion(e.target.value)} />
-                                            <textarea placeholder="Observaciones o notas adicionales..." className="w-full p-4 bg-slate-50 rounded-2xl border h-24 outline-none focus:border-blue-400" value={notas} onChange={e => setNotas(e.target.value)} />
+                                            <input type="text" placeholder="Nombre del Cliente" className="p-4 bg-slate-50 rounded-2xl border outline-none" value={nombre} onChange={e => setNombre(e.target.value)} />
+                                            <input type="text" placeholder="Dirección" className="p-4 bg-slate-50 rounded-2xl border outline-none" value={direccion} onChange={e => setDireccion(e.target.value)} />
+                                            <textarea placeholder="Notas..." className="w-full p-4 bg-slate-50 rounded-2xl border h-24 outline-none" value={notas} onChange={e => setNotas(e.target.value)} />
                                             <div className="grid grid-cols-2 gap-3">
                                                 <button onClick={sendWhatsApp} className="bg-green-600 text-white font-bold p-4 rounded-2xl flex items-center justify-center gap-2 uppercase text-[10px]"><i data-lucide="message-circle" className="w-4 h-4"></i> WhatsApp</button>
                                                 <button onClick={() => printDocument('pedido')} className="bg-slate-800 text-white font-bold p-4 rounded-2xl flex items-center justify-center gap-2 uppercase text-[10px]"><i data-lucide="download" className="w-4 h-4"></i> Guardar PDF</button>
@@ -297,19 +266,19 @@
                         {activeTab === 'gestion' && (
                             <section className="space-y-6">
                                 <div className="bg-slate-900 p-6 rounded-3xl text-white shadow-xl">
-                                    <h3 className="font-black mb-4 flex items-center gap-2 uppercase text-xs"><i data-lucide="printer"></i> Herramientas de Admin</h3>
+                                    <h3 className="font-black mb-4 uppercase text-xs">Herramientas de Admin</h3>
                                     <div className="flex flex-col gap-3">
-                                        <button onClick={() => printDocument('precios')} className="w-full py-4 bg-blue-600 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-blue-700 transition"><i data-lucide="file-text"></i> DESCARGAR LISTA DE PRECIOS (PDF)</button>
-                                        <button onClick={addTemporalProduct} className="w-full py-4 bg-purple-600 rounded-xl font-black flex items-center justify-center gap-2 hover:bg-purple-700 transition"><i data-lucide="plus-circle"></i> AGREGAR PRODUCTO ESPECIAL AL PEDIDO</button>
+                                        <button onClick={() => printDocument('precios')} className="w-full py-4 bg-blue-600 rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2"><i data-lucide="file-text"></i> Descargar Lista Precios</button>
+                                        <button onClick={addTemporalProduct} className="w-full py-4 bg-purple-600 rounded-xl font-black uppercase text-xs flex items-center justify-center gap-2"><i data-lucide="plus-circle"></i> Producto Especial (Temporal)</button>
                                     </div>
                                 </div>
-                                <div className="bg-white border-2 border-slate-100 p-6 rounded-3xl shadow-sm">
-                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase">Agregar / Editar Producto Permanente</h3>
+                                <div className="bg-white border-2 p-6 rounded-3xl shadow-sm">
+                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase">Gestionar Catálogo</h3>
                                     <form onSubmit={handleSaveProduct} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <input name="p_name" defaultValue={editingProduct?.name} placeholder="Producto (Nombre)" className="p-3 rounded-xl border col-span-1 md:col-span-2" required />
+                                        <input name="p_name" defaultValue={editingProduct?.name} placeholder="Producto" className="p-3 rounded-xl border col-span-1 md:col-span-2" required />
                                         <input name="p_price" defaultValue={editingProduct?.price} placeholder="Precio" className="p-3 rounded-xl border" required />
-                                        <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack x Unidades" className="p-3 rounded-xl border" required />
-                                        <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría (Ej: ARROZ, HARINAS)" className="p-3 rounded-xl border col-span-1 md:col-span-2" required />
+                                        <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack" className="p-3 rounded-xl border" required />
+                                        <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría (Ej: ARROZ)" className="p-3 rounded-xl border col-span-1 md:col-span-2" />
                                         <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs md:col-span-2">Guardar Permanente</button>
                                     </form>
                                 </div>
@@ -318,14 +287,16 @@
                                         <input type="text" placeholder="Buscar en Admin..." className="w-full p-2 rounded-lg border text-sm" onChange={e => setAdminSearch(e.target.value)} />
                                     </div>
                                     <table className="w-full text-sm">
-                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b"><tr><th className="p-4 text-left">Producto</th><th className="p-4 text-right">Acciones</th></tr></thead>
+                                        <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-400 border-b">
+                                            <tr><th className="p-4 text-left">Producto</th><th className="p-4 text-right">Acciones</th></tr>
+                                        </thead>
                                         <tbody>
                                             {sortedProducts.filter(p => !p.isTemp && p.name?.toLowerCase().includes(adminSearch.toLowerCase())).map(p => (
                                                 <tr key={p.id} className="border-b hover:bg-slate-50 transition">
-                                                    <td className="p-4 font-bold text-slate-800">{p.name} <br/><span className="text-[9px] text-blue-500">{p.category}</span></td>
+                                                    <td className="p-4 font-bold text-slate-800">{p.name} <br/><span className="text-[9px] text-blue-500 uppercase">{p.category || 'VARIOS'}</span></td>
                                                     <td className="p-4 text-right space-x-3">
-                                                        <button onClick={() => { setEditingProduct(p); window.scrollTo(0,0); }} className="text-blue-600 font-bold hover:underline">Editar</button>
-                                                        <button onClick={() => { if(confirm("¿Eliminar?")) db.collection("productos").doc(p.id).delete(); }} className="text-red-500 font-bold hover:underline">Borrar</button>
+                                                        <button onClick={() => { setEditingProduct(p); window.scrollTo(0,0); }} className="text-blue-600 font-bold">Editar</button>
+                                                        <button onClick={() => { if(confirm("¿Eliminar?")) db.collection("productos").doc(p.id).delete(); }} className="text-red-500 font-bold">Borrar</button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -334,42 +305,6 @@
                                 </div>
                             </section>
                         )}
-                    </div>
-
-                    {/* PDF TEMPLATES: Agrupados por categoría y ordenados alfabéticamente */}
-                    <div id="budget-pdf" className="print-template">
-                        <h1>DR DISTRIBUCIONES ROSARIO</h1>
-                        <p><strong>CLIENTE:</strong> {nombre}</p>
-                        <table>
-                            <thead><tr><th>Producto</th><th style={{textAlign:'center'}}>Cant.</th><th style={{textAlign:'right'}}>Subtotal</th></tr></thead>
-                            <tbody>
-                                {selectedItems.map(p => (
-                                    <tr key={p.id}>
-                                        <td><strong>{p.name}</strong><br/><small>{p.category} | $ {p.price.toLocaleString()} un.</small></td>
-                                        <td style={{textAlign:'center'}}>{cart[p.id]}</td>
-                                        <td style={{textAlign:'right'}}>$ {((cart[p.id] || 0) * p.price * p.pack).toLocaleString()}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                        <div className="total-box"><strong>TOTAL: $ {totalGeneral.toLocaleString()}</strong></div>
-                    </div>
-
-                    <div id="price-list-pdf" className="print-template">
-                        <h1>LISTA DE PRECIOS - DR DISTRIBUCIONES</h1>
-                        <table>
-                            <thead><tr><th>Categoría</th><th>Producto</th><th style={{textAlign:'right'}}>Precio Unit.</th></tr></thead>
-                            <tbody>
-                                {[...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category))].sort().map(cat => (
-                                    <React.Fragment key={cat}>
-                                        <tr className="cat-row"><td colSpan="3">{cat || "SIN CATEGORÍA"}</td></tr>
-                                        {sortedProducts.filter(p => p.category === cat && !p.isTemp).map(p => (
-                                            <tr key={p.id}><td></td><td>{p.name} (x{p.pack})</td><td style={{textAlign:'right'}}>$ {p.price?.toLocaleString()}</td></tr>
-                                        ))}
-                                    </React.Fragment>
-                                ))}
-                            </tbody>
-                        </table>
                     </div>
                 </div>
             );
