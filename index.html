@@ -223,7 +223,7 @@
 
             const sendWhatsApp = () => {
                 if (!nombre) return alert("Por favor, ingresa el nombre.");
-                let msg = `*PEDIDO DR DISTRIBUCIONES*\n*Cliente:* ${nombre}\n`;
+                let msg = `*PEDIDO CCS*\n*Cliente:* ${nombre}\n`;
                 if(direccion) msg += `*Dirección:* ${direccion}\n`;
                 msg += `\n--------------------------\n\n`;
                 selectedItems.forEach(p => {
@@ -253,7 +253,7 @@
                             <section>
                                 <div className="mb-8">
                                     <h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1>
-                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">CCS - Comedores</p>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 <div className="grid gap-3">
