@@ -145,14 +145,12 @@
 
             const printDocument = (type) => {
                 const fecha = new Date().toLocaleDateString();
-                
-                // GENERACIÓN DINÁMICA DE CONTENIDO (Directo desde el State)
                 let bodyContent = "";
 
                 if (type === 'pedido') {
                     bodyContent = `
                         <div style="font-family: sans-serif; padding: 10px;">
-                            <h1 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">CCS - COMEDORES</h1>
+                            <h1 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">DR DISTRIBUCIONES ROSARIO</h1>
                             <div style="margin: 20px 0;">
                                 <p><strong>CLIENTE:</strong> ${nombre || '---'}</p>
                                 <p><strong>DIRECCIÓN:</strong> ${direccion || '---'}</p>
@@ -162,6 +160,7 @@
                                 <thead>
                                     <tr style="background:#1e3a8a; color:white;">
                                         <th style="padding:10px; text-align:left;">Producto</th>
+                                        <th style="padding:10px; text-align:center;">Precio Un.</th>
                                         <th style="padding:10px; text-align:center;">Cant.</th>
                                         <th style="padding:10px; text-align:right;">Subtotal</th>
                                     </tr>
@@ -173,7 +172,8 @@
                                                 <strong>${p.name}</strong><br/>
                                                 <small style="color:#666;">${p.category || 'VARIOS'}</small>
                                             </td>
-                                            <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd;">${cart[p.id]}</td>
+                                            <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd;">$ ${p.price.toLocaleString()}</td>
+                                            <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd;">${cart[p.id]} bultos</td>
                                             <td style="padding:10px; text-align:right; border-bottom:1px solid #ddd;">$ ${((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</td>
                                         </tr>
                                     `).join('')}
@@ -182,14 +182,15 @@
                             <div style="background:#1e3a8a; color:white; padding:15px; text-align:right; margin-top:20px; border-radius:8px; font-size:18px;">
                                 <strong>TOTAL: $ ${totalGeneral.toLocaleString()}</strong>
                             </div>
+                            ${notas ? `<div style="margin-top:20px; padding:10px; border:1px solid #ddd; background:#f9f9f9;"><strong>NOTAS:</strong><br/>${notas}</div>` : ''}
                         </div>
                     `;
                 } else {
                     const categories = [...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category || "VARIOS"))].sort();
                     bodyContent = `
                         <div style="font-family: sans-serif; padding: 10px;">
-                            <h1 style="color: #1e3a8a; text-align: center;">LISTA DE PRECIOS</h1>
-                            <p style="text-align: center;">CCS - COMEDORES | ${fecha}</p>
+                            <h1 style="color: #1e3a8a; text-align: center;">LISTA DE PRECIOS OFICIAL</h1>
+                            <p style="text-align: center;">DR DISTRIBUCIONES ROSARIO | ${fecha}</p>
                             <table style="width:100%; border-collapse:collapse;">
                                 ${categories.map(cat => `
                                     <tr style="background:#f1f5f9;"><td colspan="3" style="padding:10px; font-weight:bold; border:1px solid #ddd;">${cat}</td></tr>
@@ -206,7 +207,6 @@
                     `;
                 }
 
-                // INYECCIÓN EN IFRAME
                 const iframe = document.createElement('iframe');
                 Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0', visibility: 'hidden' });
                 document.body.appendChild(iframe);
@@ -217,17 +217,18 @@
                 setTimeout(() => {
                     iframe.contentWindow.focus();
                     iframe.contentWindow.print();
-                    setTimeout(() => document.body.removeChild(iframe), 2000);
-                }, 1000);
+                    setTimeout(() => document.body.removeChild(iframe), 2500);
+                }, 1200);
             };
 
             const sendWhatsApp = () => {
                 if (!nombre) return alert("Por favor, ingresa el nombre.");
-                let msg = `*PEDIDO CCS*\n*Cliente:* ${nombre}\n`;
+                let msg = `*PEDIDO DR DISTRIBUCIONES*\n*Cliente:* ${nombre}\n`;
                 if(direccion) msg += `*Dirección:* ${direccion}\n`;
+                if(notas) msg += `*Notas:* ${notas}\n`;
                 msg += `\n--------------------------\n\n`;
                 selectedItems.forEach(p => {
-                    msg += `• *${p.name}*\n  Cant: ${cart[p.id]} bultos | Subt: $${(cart[p.id] * p.price * p.pack).toLocaleString()}\n\n`;
+                    msg += `• *${p.name}*\n  Cant: ${cart[p.id]} bultos | Precio Un: $${p.price.toLocaleString()} | Subt: $${(cart[p.id] * p.price * p.pack).toLocaleString()}\n\n`;
                 });
                 msg += `*TOTAL: $${totalGeneral.toLocaleString()}*`;
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
@@ -253,7 +254,7 @@
                             <section>
                                 <div className="mb-8">
                                     <h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1>
-                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">CCS - Comedores</p>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 <div className="grid gap-3">
