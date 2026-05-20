@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DR-CCS | Presupuesto</title>
+    <title>DR-CCS | VentasIQ Master</title>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -223,7 +223,7 @@
 
             const sendWhatsApp = () => {
                 if (!nombre) return alert("Por favor, ingresa el nombre.");
-                let msg = `*PEDIDO CCS*\n*Cliente:* ${nombre}\n`;
+                let msg = `*PEDIDO DR DISTRIBUCIONES*\n*Cliente:* ${nombre}\n`;
                 if(direccion) msg += `*Dirección:* ${direccion}\n`;
                 if(notas) msg += `*Notas:* ${notas}\n`;
                 msg += `\n--------------------------\n\n`;
@@ -254,7 +254,7 @@
                             <section>
                                 <div className="mb-8">
                                     <h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1>
-                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Distribuciones Rosario</p>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">DR Distribuciones - Comedores</p>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 <div className="grid gap-3">
@@ -263,10 +263,12 @@
                                             <div className="flex-1 w-full">
                                                 {p.category && <span className="category-badge">{p.category}</span>}
                                                 <h3 className="font-bold text-slate-800">{p.name}</h3>
-                                                <p className="text-[10px] text-slate-400 font-bold uppercase">$ {(p.price || 0).toLocaleString()} unit. | Pack x{p.pack || 1}</p>
+                                                {/* MODIFICADO: text-slate-600 para oscurecer la segunda línea */}
+                                                <p className="text-[11px] text-slate-600 font-bold uppercase">$ {(p.price || 0).toLocaleString()} unit. | Pack x{p.pack || 1}</p>
                                             </div>
                                             <div className="flex items-center gap-4 mt-4 md:mt-0">
-                                                <input type="number" className="w-20 p-2 border-2 rounded-xl text-center font-black text-blue-600" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                                {/* MODIFICADO: border-blue-400 y bg-slate-50 para enmarcar el campo de bultos */}
+                                                <input type="number" className="w-20 p-2 border-2 border-blue-400 bg-slate-50 rounded-xl text-center font-black text-blue-600 outline-none focus:border-blue-600 shadow-sm" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
                                                 <span className="font-black text-slate-900 w-28 text-right">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</span>
                                             </div>
                                         </div>
