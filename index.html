@@ -39,6 +39,9 @@
         const App = () => {
             const [activeTab, setActiveTab] = useState('catalogo');
             const [products, setProducts] = useState([]);
+            const [solicitudes, setSolicitudes] = useState([]); // Nueva base para recibir solicitudes
+            const [selectedSolicitud, setSelectedSolicitud] = useState(null); // Solicitud activa para cotizar
+            const [descuentos, setDescuentos] = useState({}); // Control de descuentos individuales por cotización
             const [isLogged, setIsLogged] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
             const [adminSearch, setAdminSearch] = useState("");
@@ -47,7 +50,7 @@
             const [notas, setNotas] = useState("");
             const [editingProduct, setEditingProduct] = useState(null);
             const [bulkData, setBulkData] = useState("");
-            const [isOnline, setIsOnline] = useState(navigator.onLine); // Estado de conexión
+            const [isOnline, setIsOnline] = useState(navigator.onLine);
             
             const [cart, setCart] = useState(() => {
                 const saved = localStorage.getItem('dr_cart_v2');
@@ -58,14 +61,11 @@
                 localStorage.setItem('dr_cart_v2', JSON.stringify(cart));
             }, [cart]);
 
-            // Escuchadores para detectar el estado de internet (Sugerencia 1)
             useEffect(() => {
                 const handleOnline = () => setIsOnline(true);
                 const handleOffline = () => setIsOnline(false);
-
                 window.addEventListener('online', handleOnline);
                 window.addEventListener('offline', handleOffline);
-
                 return () => {
                     window.removeEventListener('online', handleOnline);
                     window.removeEventListener('offline', handleOffline);
@@ -73,7 +73,7 @@
             }, []);
 
             useEffect(() => {
-                const unsubscribe = db.collection("productos").onSnapshot((snapshot) => {
+                const unsubscribeProds = db.collection("productos").onSnapshot((snapshot) => {
                     const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setProducts(prev => {
                         const temps = prev.filter(p => p.isTemp);
@@ -81,7 +81,14 @@
                     });
                     setTimeout(() => lucide.createIcons(), 150);
                 });
-                return () => unsubscribe();
+
+                // Escuchador exclusivo para recibir las solicitudes entrantes (Opción 1)
+                const unsubscribeSols = db.collection("solicitudes").orderBy("fecha", "desc").onSnapshot((snapshot) => {
+                    const sols = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setSolicitudes(sols);
+                });
+
+                return () => { unsubscribeProds(); unsubscribeSols(); };
             }, []);
 
             const parseMoney = (val) => {
@@ -101,6 +108,18 @@
             const totalGeneral = useMemo(() => {
                 return selectedItems.reduce((acc, p) => acc + ((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)), 0);
             }, [selectedItems, cart]);
+
+            // Cálculo total de la solicitud seleccionada aplicando descuentos
+            const totalSolicitudCotizada = useMemo(() => {
+                if (!selectedSolicitud) return 0;
+                return selectedSolicitud.items.reduce((acc, item) => {
+                    const prodOriginal = products.find(p => p.id === item.id);
+                    const precioBase = prodOriginal ? prodOriginal.price : 0;
+                    const desc = descuentos[item.id] || 0;
+                    const precioConDescuento = precioBase * (1 - desc / 100);
+                    return acc + (item.cantidad * precioConDescuento * (item.pack || 1));
+                }, 0);
+            }, [selectedSolicitud, products, descuentos]);
 
             const clearCart = () => {
                 if(confirm("¿Deseas vaciar el pedido?")) {
@@ -132,7 +151,8 @@
                     name: form.p_name.value,
                     price: parseMoney(form.p_price.value),
                     pack: parseInt(form.p_pack.value) || 1,
-                    category: (form.p_category.value || "VARIOS").toUpperCase()
+                    category: (form.p_category.value || "VARIOS").toUpperCase(),
+                    imageUrl: form.p_image.value || "" // Casillero de imagen guardado
                 });
                 setEditingProduct(null);
                 form.reset();
@@ -149,7 +169,8 @@
                             name: cols[0].trim(),
                             price: parseMoney(cols[1]),
                             pack: parseInt(cols[2]) || 1,
-                            category: (cols[3] || "VARIOS").trim().toUpperCase()
+                            category: (cols[3] || "VARIOS").trim().toUpperCase(),
+                            imageUrl: cols[4] ? cols[4].trim() : "" // Columna opcional 5 para links de fotos masivas
                         });
                     }
                 });
@@ -249,9 +270,38 @@
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
 
+            // Envío final del presupuesto especial con descuento aplicado
+            const enviarCotizacionEspecial = async () => {
+                let msg = `*PRESUPUESTO ESPECIAL COTIZADO - DR DISTRIBUCIONES*\n\n`;
+                msg += `*Cliente:* ${selectedSolicitud.cliente}\n`;
+                msg += `\n---------------------------------------\n\n`;
+                
+                selectedSolicitud.items.forEach(item => {
+                    const prodOriginal = products.find(p => p.id === item.id);
+                    const precioBase = prodOriginal ? prodOriginal.price : 0;
+                    const desc = descuentos[item.id] || 0;
+                    const precioFinalUn = precioBase * (1 - desc / 100);
+                    const subtotalItem = item.cantidad * precioFinalUn * (item.pack || 1);
+
+                    msg += `• *${item.name}*\n`;
+                    msg += `  ${item.cantidad} bultos x ${item.pack} un.\n`;
+                    msg += `  Precio Un: $${precioFinalUn.toLocaleString()} ${desc > 0 ? `(_Descuento aplicado: ${desc}%_)` : ''}\n`;
+                    msg += `  Subtotal: $${subtotalItem.toLocaleString()}\n\n`;
+                });
+
+                msg += `---------------------------------------\n`;
+                msg += `*TOTAL NETO A PAGAR: $ ${totalSolicitudCotizada.toLocaleString()}*\n\n`;
+                msg += `_Precios diferenciales cerrados por volumen de compra._`;
+
+                // Marcar solicitud como cotizada en Firebase
+                await db.collection("solicitudes").doc(selectedSolicitud.id).update({ estado: "cotizado" });
+                setSelectedSolicitud(null);
+                setDescuentos({});
+                window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
+            };
+
             return (
                 <div className="max-w-4xl mx-auto md:my-8 bg-white shadow-2xl md:rounded-[2.5rem] flex flex-col min-h-screen md:min-h-0 border-8 border-white overflow-hidden">
-                    {/* BARRA MODO OFFLINE (Sugerencia 1) */}
                     {!isOnline && (
                         <div className="bg-red-600 text-white text-center py-2 text-xs font-bold uppercase tracking-wider animate-pulse no-print">
                             <i data-lucide="wifi-off" className="inline w-3 h-3 mr-1.5 align-middle"></i>
@@ -286,7 +336,6 @@
                                             <div className="flex-1 w-full">
                                                 {p.category && <span className="category-badge">{p.category}</span>}
                                                 <h3 className="font-bold text-slate-800">{p.name}</h3>
-                                                {/* MODIFICADO: text-blue-600 y text-[13px] para mejorar visualización */}
                                                 <p className="text-[13px] text-blue-600 font-bold uppercase">$ {(p.price || 0).toLocaleString()} unit. | Pack x{p.pack || 1}</p>
                                             </div>
                                             <div className="flex items-center gap-4 mt-4 md:mt-0">
@@ -334,6 +383,70 @@
 
                         {activeTab === 'gestion' && (
                             <section className="space-y-6">
+                                {/* PANEL RECEPTOR DE SOLICITUDES DE CLIENTES ESPECIALES */}
+                                <div className="bg-blue-50 p-6 rounded-3xl border-2 border-blue-200">
+                                    <h3 className="font-black text-blue-950 mb-4 uppercase text-xs flex items-center gap-2"><i data-lucide="inbox"></i> Solicitudes de Clientes Especiales (A Cotizar)</h3>
+                                    {selectedSolicitud ? (
+                                        <div className="bg-white p-4 rounded-2xl border border-blue-300 space-y-4">
+                                            <div className="flex justify-between items-start border-b pb-3">
+                                                <div>
+                                                    <h4 className="font-black text-slate-900">{selectedSolicitud.cliente}</h4>
+                                                    <p className="text-xs text-slate-500">Dirección: {selectedSolicitud.direccion || '---'}</p>
+                                                    {selectedSolicitud.notas && <p className="text-xs text-purple-700 font-bold mt-1">Nota: {selectedSolicitud.notas}</p>}
+                                                </div>
+                                                <button onClick={() => { setSelectedSolicitud(null); setDescuentos({}); }} className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1 rounded-lg font-bold">Volver</button>
+                                            </div>
+                                            
+                                            <div className="space-y-3">
+                                                {selectedSolicitud.items.map(item => {
+                                                    const prodOriginal = products.find(p => p.id === item.id);
+                                                    const precioBase = prodOriginal ? prodOriginal.price : 0;
+                                                    return (
+                                                        <div key={item.id} className="flex flex-col sm:flex-row justify-between sm:items-center bg-slate-50 p-3 rounded-xl border">
+                                                            <div className="flex-1">
+                                                                <p className="font-bold text-sm text-slate-800">{item.name}</p>
+                                                                <p className="text-xs text-slate-500">Pidió: {item.cantidad} bultos | Base Unit: ${precioBase.toLocaleString()}</p>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                                                                <span className="text-xs text-slate-600 font-bold">% Desc:</span>
+                                                                <input type="number" min="0" max="100" placeholder="0" className="w-16 p-1 border rounded-lg text-center font-bold text-blue-600" value={descuentos[item.id] || ""} onChange={e => setDescuentos({...descuentos, [item.id]: parseFloat(e.target.value) || 0})} />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            <div className="pt-4 border-t flex justify-between items-center">
+                                                <div>
+                                                    <p className="text-xs font-bold text-slate-500 uppercase">Total Cotizado</p>
+                                                    <p className="text-xl font-black text-blue-600">$ {totalSolicitudCotizada.toLocaleString()}</p>
+                                                </div>
+                                                <button onClick={enviarCotizacionEspecial} className="bg-green-600 hover:bg-green-700 text-white font-black px-5 py-3 rounded-xl uppercase text-xs flex items-center gap-2">
+                                                    <i data-lucide="send"></i> Enviar Cotización x WhatsApp
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {solicitudes.length === 0 ? (
+                                                <p className="text-center text-xs text-slate-500 py-4 font-bold uppercase">No hay solicitudes entrantes en la lista</p>
+                                            ) : (
+                                                solicitudes.map(sol => (
+                                                    <div key={sol.id} className="flex justify-between items-center bg-white p-3 rounded-xl border border-blue-100 hover:border-blue-300 transition">
+                                                        <div>
+                                                            <p className="font-black text-slate-800 text-sm">{sol.cliente}</p>
+                                                            <p className="text-[10px] font-bold text-slate-400 uppercase">{sol.items.length} artículos | Estado: <span className={sol.estado === 'pendiente' ? 'text-orange-500' : 'text-green-600'}>{sol.estado}</span></p>
+                                                        </div>
+                                                        <button onClick={() => setSelectedSolicitud(sol)} className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg">
+                                                            Cotizar
+                                                        </button>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
                                 <div className="bg-slate-900 p-6 rounded-3xl text-white shadow-xl">
                                     <h3 className="font-black mb-4 uppercase text-xs">Herramientas de Admin</h3>
                                     <div className="flex flex-col gap-3">
@@ -347,7 +460,7 @@
                                         <h3 className="font-black text-orange-900 text-xs uppercase">Importación Masiva (Excel)</h3>
                                         <button onClick={() => { if(confirm("¿Borrar todo?")) db.collection("productos").get().then(s => s.forEach(d => d.ref.delete())); }} className="bg-red-600 text-white px-4 py-2 rounded-xl text-[10px] font-bold uppercase hover:bg-red-700 transition shadow-md"><i data-lucide="trash-2" className="inline w-3 h-3 mr-1"></i> Borrar Todo</button>
                                     </div>
-                                    <textarea className="w-full h-24 p-4 rounded-2xl border mt-2 text-xs font-mono outline-none focus:border-orange-400" placeholder="Producto [TAB] Precio [TAB] Pack [TAB] Categoría" value={bulkData} onChange={e => setBulkData(e.target.value)} />
+                                    <textarea className="w-full h-24 p-4 rounded-2xl border mt-2 text-xs font-mono outline-none focus:border-orange-400" placeholder="Producto [TAB] Precio [TAB] Pack [TAB] Categoría [TAB] Link Imagen (Opcional)" value={bulkData} onChange={e => setBulkData(e.target.value)} />
                                     <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Excel</button>
                                 </div>
 
@@ -358,6 +471,7 @@
                                         <input name="p_price" defaultValue={editingProduct?.price} placeholder="Precio" className="p-3 rounded-xl border" required />
                                         <input name="p_pack" defaultValue={editingProduct?.pack} placeholder="Pack" className="p-3 rounded-xl border" required />
                                         <input name="p_category" defaultValue={editingProduct?.category} placeholder="Categoría" className="p-3 rounded-xl border col-span-1 md:col-span-2" />
+                                        <input name="p_image" defaultValue={editingProduct?.imageUrl} placeholder="Link de la imagen del producto (Opcional)" className="p-3 rounded-xl border col-span-1 md:col-span-2 text-xs" />
                                         <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs md:col-span-2">Guardar Permanente</button>
                                     </form>
                                 </div>
