@@ -1,1 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DR-CCS | Solicitud de Presupuesto</title>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; }
+        .category-badge { background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 4px; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyABBIDqDnx-yu75601EQZ-yQ_VNkbdApGY",
+            authDomain: "dr-ccs.firebaseapp.com",
+            projectId: "dr-ccs",
+            storageBucket: "dr-ccs.firebasestorage.app",
+            messagingSenderId: "715483746859",
+            appId: "1:715483746859:web:b3355feaa35baf709dd06e"
+        };
+
+        if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+        const db = firebase.firestore();
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState('catalogo');
+            const [products, setProducts] = useState([]);
+            const [searchTerm, setSearchTerm] = useState("");
+            const [nombre, setNombre] = useState("");
+            const [direccion, setDireccion] = useState("");
+            const [notas, setNotas] = useState("");
+            const [enviando, setEnviando] = useState(false);
+            const [cart, setCart] = useState({});
+
+            useEffect(() => {
+                const unsubscribe = db.collection("productos").onSnapshot((snapshot) => {
+                    const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setProducts(prods);
+                    setTimeout(() => lucide.createIcons(), 150);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            const sortedProducts = useMemo(() => {
+                return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            }, [products]);
+
+            const selectedItems = useMemo(() => {
+                return sortedProducts.filter(p => cart[p.id] && cart[p.id] > 0);
+            }, [sortedProducts, cart]);
+
+            const handleEnviarSolicitud = async () => {
+                if (!nombre.trim()) return alert("Por favor, ingresa el Nombre de tu Comedor / Institución.");
+                setEnviando(true);
+
+                try {
+                    const pedidoItems = selectedItems.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        pack: p.pack || 1,
+                        category: p.category || "VARIOS",
+                        cantidad: cart[p.id]
+                    }));
+
+                    await db.collection("solicitudes").add({
+                        cliente: nombre.toUpperCase(),
+                        direccion: direccion.toUpperCase(),
+                        notas: notas,
+                        fecha: new Date().toISOString(),
+                        items: pedidoItems,
+                        estado: "pendiente"
+                    });
+
+                    // Mensaje espejo por WhatsApp
+                    let msg = `*SOLICITUD DE PRESUPUESTO - DR DISTRIBUCIONES*\n\n`;
+                    msg += `*Cliente:* ${nombre}\n`;
+                    if(direccion) msg += `*Dirección:* ${direccion}\n`;
+                    if(notas) msg += `*Notas:* ${notas}\n`;
+                    msg += `\n--------------------------\n\n`;
+                    selectedItems.forEach(p => {
+                        msg += `• *${p.name}*\n  Cantidad: ${cart[p.id]} bultos (Pack x${p.pack || 1})\n\n`;
+                    });
+                    msg += `_La solicitud ha sido registrada en el sistema. Quedo a la espera del presupuesto con precio especial._`;
+
+                    alert("¡Solicitud enviada con éxito! Ahora te redirigiremos a WhatsApp para finalizar el contacto.");
+                    setCart({});
+                    setNombre("");
+                    setDireccion("");
+                    setNotas("");
+                    setActiveTab('catalogo');
+                    window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
+                } catch (error) {
+                    alert("Hubo un problema al enviar la solicitud. Intenta nuevamente.");
+                } finally {
+                    setEnviando(false);
+                }
+            };
+
+            return (
+                <div className="max-w-4xl mx-auto md:my-8 bg-white shadow-2xl md:rounded-[2.5rem] flex flex-col min-h-screen md:min-h-0 border-8 border-white overflow-hidden">
+                    <nav className="bg-slate-900 text-white flex p-1.5">
+                        <button onClick={() => setActiveTab('catalogo')} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 ${activeTab === 'catalogo' ? 'bg-blue-600' : ''}`}>
+                            <i data-lucide="layout-grid" className="w-5 h-5"></i><span className="text-[10px] uppercase font-bold">Catálogo Visual</span>
+                        </button>
+                        <button onClick={() => setActiveTab('presupuesto')} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 relative ${activeTab === 'presupuesto' ? 'bg-blue-600' : ''}`}>
+                            <i data-lucide="file-text" className="w-5 h-5"></i><span className="text-[10px] uppercase font-bold">Mi Solicitud</span>
+                            {selectedItems.length > 0 && <span className="absolute top-2 right-4 bg-red-600 w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold">{selectedItems.length}</span>}
+                        </button>
+                    </nav>
+
+                    <div className="p-6 md:p-10 flex-1">
+                        {activeTab === 'catalogo' && (
+                            <section>
+                                <div className="mb-8">
+                                    <h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Solicitud de Presupuesto Especial</p>
+                                </div>
+                                <input type="text" placeholder="Buscar productos en exposición..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
+                                
+                                {/* DISEÑO EN CUADRÍCULA (GRIDS CON IMÁGENES) */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                                    {sortedProducts.filter(p => (p.name || "").toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+                                        <div key={p.id} className="border-2 border-slate-100 rounded-3xl p-4 flex flex-col bg-white shadow-sm hover:border-blue-200 transition justify-between">
+                                            <div>
+                                                <div className="w-full h-28 bg-slate-50 rounded-2xl mb-3 flex items-center justify-center overflow-hidden border">
+                                                    {p.imageUrl ? (
+                                                        <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-1" />
+                                                    ) : (
+                                                        <i data-lucide="image" className="w-8 h-8 text-slate-300"></i>
+                                                    )}
+                                                </div>
+                                                {p.category && <span className="category-badge">{p.category}</span>}
+                                                <h3 className="font-bold text-slate-800 text-sm line-clamp-2 leading-snug mb-1">{p.name}</h3>
+                                                <p className="text-[11px] text-blue-600 font-extrabold uppercase mb-3">Empaque: Bulto x{p.pack || 1} un.</p>
+                                            </div>
+                                            <div className="mt-2">
+                                                <input type="number" min="0" placeholder="0 bultos" className="w-full p-2 border-2 border-blue-400 bg-slate-50 rounded-xl text-center font-black text-blue-600 outline-none focus:border-blue-600 shadow-sm text-sm" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </section>
+                        )}
+
+                        {activeTab === 'presupuesto' && (
+                            <section className="space-y-6">
+                                <h2 className="text-2xl font-black text-slate-900">Lista de Artículos a Cotizar</h2>
+                                {selectedItems.length === 0 ? <p className="text-center py-20 text-slate-300 font-bold uppercase">No has seleccionado cantidades todavía</p> : (
+                                    <>
+                                        <div className="bg-white border-2 rounded-3xl overflow-hidden shadow-sm">
+                                            {selectedItems.map(p => (
+                                                <div key={p.id} className="flex justify-between items-center p-4 border-b last:border-0">
+                                                    <div>
+                                                        <p className="font-bold text-slate-800 text-sm">{p.name}</p>
+                                                        <p className="text-[10px] text-slate-500 font-bold uppercase">{p.category || 'VARIOS'} (Bulto x{p.pack || 1})</p>
+                                                    </div>
+                                                    <span className="bg-blue-50 text-blue-600 font-black px-4 py-2 rounded-xl border border-blue-100 text-sm">{cart[p.id]} bultos</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-4">
+                                            <input type="text" placeholder="Nombre del Comedor / Institución" className="p-4 bg-slate-50 rounded-2xl border outline-none font-bold" value={nombre} onChange={e => setNombre(e.target.value)} />
+                                            <input type="text" placeholder="Dirección de Entrega" className="p-4 bg-slate-50 rounded-2xl border outline-none" value={direccion} onChange={e => setDireccion(e.target.value)} />
+                                            <textarea placeholder="Notas o aclaraciones sobre la entrega..." className="w-full p-4 bg-slate-50 rounded-2xl border h-24 outline-none" value={notas} onChange={e => setNotas(e.target.value)} />
+                                            <button onClick={handleEnviarSolicitud} disabled={enviando} className="w-full bg-blue-600 text-white font-extrabold p-5 rounded-2xl flex items-center justify-center gap-2 uppercase text-sm shadow-lg hover:bg-blue-700 transition disabled:bg-slate-400">
+                                                <i data-lucide="send" className="w-4 h-4"></i> {enviando ? "Enviando al sistema..." : "Enviar Solicitud de Presupuesto"}
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </section>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
