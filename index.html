@@ -50,6 +50,13 @@
             const [bulkData, setBulkData] = useState("");
             const [cart, setCart] = useState({});
 
+            // Valores de formulario controlados para edición segura
+            const [formName, setFormName] = useState("");
+            const [formPrice, setFormPrice] = useState("");
+            const [formPack, setFormPack] = useState("");
+            const [formCategory, setFormCategory] = useState("");
+            const [formImage, setFormImage] = useState("");
+
             useEffect(() => {
                 const unsubscribeProds = db.collection("productos").onSnapshot((snapshot) => {
                     const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -89,6 +96,12 @@
                 }, {});
             }, [products, searchTerm]);
 
+            // Filtrado de productos para la tabla de administración
+            const filteredAdminProducts = useMemo(() => {
+                return products.filter(p => (p.name || "").toLowerCase().includes(adminSearch.toLowerCase()))
+                               .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            }, [products, adminSearch]);
+
             const selectedItems = useMemo(() => {
                 return products.filter(p => cart[p.id] && cart[p.id] > 0).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
             }, [products, cart]);
@@ -110,17 +123,43 @@
 
             const handleSaveProduct = async (e) => {
                 e.preventDefault();
-                const form = e.target;
                 const id = editingProduct ? editingProduct.id : Date.now().toString();
                 await db.collection("productos").doc(id).set({
-                    name: form.p_name.value,
-                    price: parseMoney(form.p_price.value),
-                    pack: parseInt(form.p_pack.value) || 1,
-                    category: (form.p_category.value || "VARIOS").toUpperCase(),
-                    imageUrl: form.p_image.value || ""
+                    name: formName,
+                    price: parseMoney(formPrice),
+                    pack: parseInt(formPack) || 1,
+                    category: (formCategory || "VARIOS").toUpperCase(),
+                    imageUrl: formImage || ""
                 });
                 setEditingProduct(null);
-                form.reset();
+                clearForm();
+                alert("Producto guardado correctamente.");
+            };
+
+            const startEdit = (p) => {
+                setEditingProduct(p);
+                setFormName(p.name || "");
+                setFormPrice(p.price || "");
+                setFormPack(p.pack || "1");
+                setFormCategory(p.category || "VARIOS");
+                setFormImage(p.imageUrl || "");
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            const deleteProduct = async (id, name) => {
+                if (confirm(`¿Estás seguro de que querés eliminar permanentemente "${name}"?`)) {
+                    await db.collection("productos").doc(id).delete();
+                    alert("Producto eliminado.");
+                }
+            };
+
+            const clearForm = () => {
+                setEditingProduct(null);
+                setFormName("");
+                setFormPrice("");
+                setFormPack("");
+                setFormCategory("");
+                setFormImage("");
             };
 
             const handleBulkImport = async () => {
@@ -141,7 +180,7 @@
                 });
                 await batch.commit();
                 setBulkData("");
-                alert("Importación completada.");
+                alert("Importación masiva completada con éxito.");
             };
 
             const printDocument = (type) => {
@@ -326,6 +365,30 @@
 
                         {activeTab === 'gestion' && (
                             <section className="space-y-6">
+                                <div className="bg-white border-2 p-6 rounded-3xl shadow-sm">
+                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase tracking-wider">
+                                        {editingProduct ? "📝 Editar Producto Seleccionado" : "➕ Agregar Producto Individual"}
+                                    </h3>
+                                    <form onSubmit={handleSaveProduct} className="grid grid-cols-1 gap-3">
+                                        <input placeholder="Nombre del Producto" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formName} onChange={e => setFormName(e.target.value)} required />
+                                        <input placeholder="Precio (Ej: 1500)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formPrice} onChange={e => setFormPrice(e.target.value)} required />
+                                        <input placeholder="Unidades por Pack (Ej: 1 o 6)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formPack} onChange={e => setFormPack(e.target.value)} required />
+                                        <input placeholder="Categoría (Ej: ALMACEN)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formCategory} onChange={e => setFormCategory(e.target.value)} />
+                                        <input placeholder="Link de Imagen (Opcional)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formImage} onChange={e => setFormImage(e.target.value)} />
+                                        
+                                        <div className="grid grid-cols-2 gap-2 mt-2">
+                                            <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs shadow-md">
+                                                {editingProduct ? "Actualizar" : "Guardar Permanente"}
+                                            </button>
+                                            {editingProduct && (
+                                                <button type="button" onClick={clearForm} className="bg-slate-500 text-white font-bold rounded-xl py-3 uppercase text-xs shadow-md">
+                                                    Cancelar Edición
+                                                </button>
+                                            )}
+                                        </div>
+                                    </form>
+                                </div>
+
                                 <div className="bg-blue-50 p-6 rounded-3xl border-2 border-blue-200">
                                     <h3 className="font-black text-blue-950 mb-4 uppercase text-xs">Solicitudes Recibidas</h3>
                                     {selectedSolicitud ? (
@@ -348,8 +411,8 @@
                                         </div>
                                     ) : (
                                         <div className="space-y-2">
-                                            {solicitudes.map(sol => (
-                                                <div key={sol.id} className="flex justify-between items-center bg-white p-3 rounded-xl border">
+                                            {solicitudes.length === 0 ? <p className="text-xs text-slate-400 font-bold uppercase">No hay solicitudes pendientes</p> : solicitudes.map(sol => (
+                                                <div key={sol.id} className="flex justify-between items-center bg-white p-3 rounded-xl border shadow-sm">
                                                     <div><p className="font-black text-slate-800 text-sm">{sol.cliente}</p></div>
                                                     <button onClick={() => setSelectedSolicitud(sol)} className="bg-blue-600 text-white font-bold text-xs px-3 py-1.5 rounded-lg">Cotizar</button>
                                                 </div>
@@ -358,26 +421,43 @@
                                     )}
                                 </div>
 
-                                <div className="bg-slate-900 p-6 rounded-3xl text-white">
+                                <div className="bg-slate-900 p-6 rounded-3xl text-white flex gap-3">
                                     <button onClick={() => printDocument('precios')} className="w-full py-4 bg-blue-600 rounded-xl font-black uppercase text-xs">Descargar Lista Precios</button>
                                 </div>
 
                                 <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-100">
-                                    <h3 className="font-black text-orange-900 text-xs uppercase mb-2">Importación Masiva</h3>
-                                    <textarea className="w-full h-24 p-4 rounded-2xl border text-xs font-mono outline-none" placeholder="Producto [TAB] Precio [TAB] Pack [TAB] Categoría" value={bulkData} onChange={e => setBulkData(e.target.value)} />
-                                    <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Excel</button>
+                                    <h3 className="font-black text-orange-900 text-xs uppercase mb-2">Importación Masiva desde Excel</h3>
+                                    <textarea className="w-full h-24 p-4 rounded-2xl border text-xs font-mono outline-none focus:border-orange-400" placeholder="Producto [TAB] Precio [TAB] Pack [TAB] Categoría" value={bulkData} onChange={e => setBulkData(e.target.value)} />
+                                    <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Bloque</button>
                                 </div>
 
-                                <div className="bg-white border-2 p-6 rounded-3xl">
-                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase">Agregar Individual</h3>
-                                    <form onSubmit={handleSaveProduct} className="grid grid-cols-1 gap-3">
-                                        <input name="p_name" placeholder="Producto" className="p-3 rounded-xl border text-sm" required />
-                                        <input name="p_price" placeholder="Precio" className="p-3 rounded-xl border text-sm" required />
-                                        <input name="p_pack" placeholder="Pack" className="p-3 rounded-xl border text-sm" required />
-                                        <input name="p_category" placeholder="Categoría" className="p-3 rounded-xl border text-sm" />
-                                        <input name="p_image" placeholder="Link Imagen (Opcional)" className="p-3 rounded-xl border text-sm" />
-                                        <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs">Guardar Permanente</button>
-                                    </form>
+                                {/* LISTADO DE CONTROL INTEGRADO PARA ELIMINAR / EDITAR */}
+                                <div className="bg-white border-2 p-6 rounded-3xl shadow-sm">
+                                    <h3 className="font-black text-slate-800 mb-3 text-xs uppercase tracking-wider">📦 Panel de Control de Productos Cargados</h3>
+                                    <input type="text" placeholder="Filtrar productos en admin..." className="w-full p-3 bg-slate-50 border rounded-xl mb-4 text-sm outline-none focus:border-blue-500" value={adminSearch} onChange={e => setAdminSearch(e.target.value)} />
+                                    
+                                    <div className="max-h-96 overflow-y-auto border rounded-xl divide-y bg-slate-50">
+                                        {filteredAdminProducts.length === 0 ? (
+                                            <p className="p-4 text-center text-xs text-slate-400 font-bold uppercase">No se encontraron productos</p>
+                                        ) : filteredAdminProducts.map(p => (
+                                            <div key={p.id} className="p-3 flex items-center justify-between bg-white hover:bg-slate-50 transition">
+                                                <div className="max-w-[70%]">
+                                                    <p className="font-bold text-slate-800 text-sm truncate">{p.name}</p>
+                                                    <p className="text-[11px] font-bold text-blue-600 uppercase">
+                                                        $ {(p.price || 0).toLocaleString()} | Pack x{p.pack || 1} | <span className="text-slate-400">{p.category || 'VARIOS'}</span>
+                                                    </p>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button onClick={() => startEdit(p)} className="bg-yellow-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg uppercase tracking-wider shadow-sm">
+                                                        Editar
+                                                    </button>
+                                                    <button onClick={() => deleteProduct(p.id, p.name)} className="bg-red-600 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg uppercase tracking-wider shadow-sm">
+                                                        Borrar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </section>
                         )}
@@ -387,7 +467,7 @@
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render((<App />));
     </script>
 </body>
 </html>
