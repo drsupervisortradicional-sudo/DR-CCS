@@ -305,7 +305,7 @@
 
                 msg += `---------------------------------------\n`;
                 msg += `*TOTAL NETO A PAGAR: $ ${totalSolicitudCotizada.toLocaleString()}*\n\n`;
-                msg += `_Precios diferenciales cerrados por volumen de compra._`;
+                msg += `_Precios differentials cerrados por volumen de compra._`;
 
                 await db.collection("solicitudes").doc(selectedSolicitud.id).update({ estado: "cotizado" });
                 setSelectedSolicitud(null);
