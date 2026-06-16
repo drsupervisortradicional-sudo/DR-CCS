@@ -3,17 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DR-CCS | VentasIQ Master</title>
+    <title>DR-CCS | Solicitud de Presupuesto</title>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; }
-        @media print { #root { display: none !important; } }
+        .category-badge { background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: bold; text-transform: uppercase; margin-bottom: 4px; display: inline-block; }
     </style>
 </head>
 <body>
@@ -37,48 +38,25 @@
         const App = () => {
             const [activeTab, setActiveTab] = useState('catalogo');
             const [products, setProducts] = useState([]);
-            const [solicitudes, setSolicitudes] = useState([]);
-            const [selectedSolicitud, setSelectedSolicitud] = useState(null);
-            const [descuentos, setDescuentos] = useState({});
-            const [isLogged, setIsLogged] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
-            const [adminSearch, setAdminSearch] = useState("");
             const [nombre, setNombre] = useState("");
             const [direccion, setDireccion] = useState("");
             const [notas, setNotas] = useState("");
-            const [editingProduct, setEditingProduct] = useState(null);
-            const [bulkData, setBulkData] = useState("");
+            const [enviando, setEnviando] = useState(false);
             const [cart, setCart] = useState({});
 
-            // Valores de formulario controlados para edición segura
-            const [formName, setFormName] = useState("");
-            const [formPrice, setFormPrice] = useState("");
-            const [formPack, setFormPack] = useState("");
-            const [formCategory, setFormCategory] = useState("");
-            const [formImage, setFormImage] = useState("");
-
             useEffect(() => {
-                const unsubscribeProds = db.collection("productos").onSnapshot((snapshot) => {
+                const unsubscribe = db.collection("productos").onSnapshot((snapshot) => {
                     const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setProducts(prods);
+                    setTimeout(() => lucide.createIcons(), 150);
                 });
-
-                const unsubscribeSols = db.collection("solicitudes").orderBy("fecha", "desc").onSnapshot((snapshot) => {
-                    const sols = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setSolicitudes(sols);
-                });
-
-                return () => { unsubscribeProds(); unsubscribeSols(); };
+                return () => unsubscribe();
             }, []);
-
-            const parseMoney = (val) => {
-                if (!val) return 0;
-                let clean = val.toString().replace("$", "").replace(/\./g, "").replace(",", ".");
-                return parseFloat(clean) || 0;
-            };
 
             const categorizedProducts = useMemo(() => {
                 const filtered = products.filter(p => (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()));
+                
                 const groups = filtered.reduce((acc, p) => {
                     const cat = (p.category || "VARIOS").toUpperCase().trim();
                     if (!acc[cat]) acc[cat] = [];
@@ -96,202 +74,68 @@
                 }, {});
             }, [products, searchTerm]);
 
-            // Filtrado de productos para la tabla de administración
-            const filteredAdminProducts = useMemo(() => {
-                return products.filter(p => (p.name || "").toLowerCase().includes(adminSearch.toLowerCase()))
-                               .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-            }, [products, adminSearch]);
-
             const selectedItems = useMemo(() => {
                 return products.filter(p => cart[p.id] && cart[p.id] > 0).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
             }, [products, cart]);
 
-            const totalGeneral = useMemo(() => {
-                return selectedItems.reduce((acc, p) => acc + ((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)), 0);
-            }, [selectedItems, cart]);
+            const handleEnviarSolicitud = async () => {
+                if (!nombre.trim()) return alert("Por favor, ingresa el Nombre de tu Comedor / Institución.");
+                setEnviando(true);
 
-            const totalSolicitudCotizada = useMemo(() => {
-                if (!selectedSolicitud) return 0;
-                return selectedSolicitud.items.reduce((acc, item) => {
-                    const prodOriginal = products.find(p => p.id === item.id);
-                    const precioBase = prodOriginal ? prodOriginal.price : 0;
-                    const desc = descuentos[item.id] || 0;
-                    const precioConDescuento = precioBase * (1 - desc / 100);
-                    return acc + (item.cantidad * precioConDescuento * (item.pack || 1));
-                }, 0);
-            }, [selectedSolicitud, products, descuentos]);
+                try {
+                    const pedidoItems = selectedItems.map(p => ({
+                        id: p.id,
+                        name: p.name,
+                        pack: p.pack || 1,
+                        category: p.category || "VARIOS",
+                        cantidad: cart[p.id]
+                    }));
 
-            const handleSaveProduct = async (e) => {
-                e.preventDefault();
-                const id = editingProduct ? editingProduct.id : Date.now().toString();
-                await db.collection("productos").doc(id).set({
-                    name: formName,
-                    price: parseMoney(formPrice),
-                    pack: parseInt(formPack) || 1,
-                    category: (formCategory || "VARIOS").toUpperCase(),
-                    imageUrl: formImage || ""
-                });
-                setEditingProduct(null);
-                clearForm();
-                alert("Producto guardado correctamente.");
-            };
+                    await db.collection("solicitudes").add({
+                        cliente: nombre.toUpperCase(),
+                        direccion: direccion.toUpperCase(),
+                        notas: notas,
+                        fecha: new Date().toISOString(),
+                        items: pedidoItems,
+                        estado: "pendiente"
+                    });
 
-            const startEdit = (p) => {
-                setEditingProduct(p);
-                setFormName(p.name || "");
-                setFormPrice(p.price || "");
-                setFormPack(p.pack || "1");
-                setFormCategory(p.category || "VARIOS");
-                setFormImage(p.imageUrl || "");
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            };
+                    let msg = `*SOLICITUD DE PRESUPUESTO - DR DISTRIBUCIONES*\n\n`;
+                    msg += `*Cliente:* ${nombre}\n`;
+                    if(direccion) msg += `*Dirección:* ${direccion}\n`;
+                    if(notas) msg += `*Notas:* ${notas}\n`;
+                    msg += `\n--------------------------\n\n`;
+                    selectedItems.forEach(p => {
+                        msg += `• *${p.name}*\n  Cantidad: ${cart[p.id]} bultos (Pack x${p.pack || 1})\n\n`;
+                    });
+                    msg += `_La solicitud ha sido registrada en el sistema. Quedo a la espera del presupuesto con precio especial._`;
 
-            const deleteProduct = async (id, name) => {
-                if (confirm(`¿Estás seguro de que querés eliminar permanentemente "${name}"?`)) {
-                    await db.collection("productos").doc(id).delete();
-                    alert("Producto eliminado.");
+                    alert("¡Solicitud enviada con éxito! Ahora te redirigiremos a WhatsApp para finalizar el contacto.");
+                    setCart({});
+                    setNombre("");
+                    setDireccion("");
+                    setNotas("");
+                    setActiveTab('catalogo');
+                    window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
+                } catch (error) {
+                    alert("Hubo un problema al enviar la solicitud. Intenta nuevamente.");
+                } finally {
+                    setEnviando(false);
                 }
-            };
-
-            const clearForm = () => {
-                setEditingProduct(null);
-                setFormName("");
-                setFormPrice("");
-                setFormPack("");
-                setFormCategory("");
-                setFormImage("");
-            };
-
-            const handleBulkImport = async () => {
-                const rows = bulkData.trim().split("\n");
-                const batch = db.batch();
-                rows.forEach(row => {
-                    const cols = row.split("\t");
-                    if (cols.length >= 3) {
-                        const id = (Date.now() + Math.random()).toString().replace(".","");
-                        batch.set(db.collection("productos").doc(id), {
-                            name: cols[0].trim(),
-                            price: parseMoney(cols[1]),
-                            pack: parseInt(cols[2]) || 1,
-                            category: (cols[3] || "VARIOS").trim().toUpperCase(),
-                            imageUrl: cols[4] ? cols[4].trim() : ""
-                        });
-                    }
-                });
-                await batch.commit();
-                setBulkData("");
-                alert("Importación masiva completada con éxito.");
-            };
-
-            const printDocument = (type) => {
-                const fecha = new Date().toLocaleDateString();
-                let bodyContent = "";
-
-                if (type === 'pedido') {
-                    bodyContent = `
-                        <div style="font-family: sans-serif; padding: 10px;">
-                            <h1 style="color: #1e3a8a; border-bottom: 2px solid #1e3a8a; padding-bottom: 10px;">DR DISTRIBUCIONES ROSARIO</h1>
-                            <div style="margin: 20px 0;">
-                                <p><strong>CLIENTE:</strong> ${nombre || '---'}</p>
-                                <p><strong>DIRECCIÓN:</strong> ${direccion || '---'}</p>
-                                <p><strong>FECHA:</strong> ${fecha}</p>
-                            </div>
-                            <table style="width:100%; border-collapse:collapse;">
-                                <thead>
-                                    <tr style="background:#1e3a8a; color:white;">
-                                        <th style="padding:10px; text-align:left;">Producto</th>
-                                        <th style="padding:10px; text-align:center;">Precio Un.</th>
-                                        <th style="padding:10px; text-align:center;">Cant.</th>
-                                        <th style="padding:10px; text-align:right;">Subtotal</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${selectedItems.map(p => `
-                                        <tr>
-                                            <td style="padding:10px; border-bottom:1px solid #ddd;">
-                                                <strong>${p.name}</strong><br/>
-                                                <small style="color:#666;">${p.category || 'VARIOS'}</small>
-                                            </td>
-                                            <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd;">$ ${p.price.toLocaleString()}</td>
-                                            <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd;">${cart[p.id]} bultos</td>
-                                            <td style="padding:10px; text-align:right; border-bottom:1px solid #ddd;">$ ${((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                            <div style="background:#1e3a8a; color:white; padding:15px; text-align:right; margin-top:20px; border-radius:8px; font-size:18px;">
-                                <strong>TOTAL: $ ${totalGeneral.toLocaleString()}</strong>
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    const categories = [...new Set(products.map(p => p.category || "VARIOS"))].sort();
-                    bodyContent = `
-                        <div style="font-family: sans-serif; padding: 10px;">
-                            <h1 style="color: #1e3a8a; text-align: center;">LISTA DE PRECIOS OFICIAL</h1>
-                            <p style="text-align: center;">DR DISTRIBUCIONES ROSARIO | ${fecha}</p>
-                            <table style="width:100%; border-collapse:collapse;">
-                                ${categories.map(cat => `
-                                    <tr style="background:#f1f5f9;"><td colspan="3" style="padding:10px; font-weight:bold; border:1px solid #ddd;">${cat}</td></tr>
-                                    ${products.filter(p => (p.category || "VARIOS") === cat).map(p => `
-                                        <tr>
-                                            <td style="padding:10px; border:1px solid #ddd;">${p.name}</td>
-                                            <td style="padding:10px; text-align:center; border:1px solid #ddd;">x${p.pack}</td>
-                                            <td style="padding:10px; text-align:right; border:1px solid #ddd;">$ ${p.price.toLocaleString()}</td>
-                                        </tr>
-                                    `).join('')}
-                                `).join('')}
-                            </table>
-                        </div>
-                    `;
-                }
-
-                const iframe = document.createElement('iframe');
-                Object.assign(iframe.style, { position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0', visibility: 'hidden' });
-                document.body.appendChild(iframe);
-                const doc = iframe.contentWindow.document;
-                doc.write(`<html><body>${bodyContent}</body></html>`);
-                doc.close();
-                setTimeout(() => { iframe.contentWindow.focus(); iframe.contentWindow.print(); document.body.removeChild(iframe); }, 1000);
-            };
-
-            const sendWhatsApp = () => {
-                if (!nombre) return alert("Por favor, ingresa el nombre.");
-                let msg = `*PEDIDO DR DISTRIBUCIONES*\n*Cliente:* ${nombre}\n`;
-                selectedItems.forEach(p => {
-                    msg += `• *${p.name}*\n  Cant: ${cart[p.id]} bultos | Subt: $${(cart[p.id] * p.price * p.pack).toLocaleString()}\n\n`;
-                });
-                msg += `*TOTAL: $${totalGeneral.toLocaleString()}*`;
-                window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
-            };
-
-            const enviarCotizacionEspecial = async () => {
-                let msg = `*PRESUPUESTO ESPECIAL COTIZADO - DR DISTRIBUCIONES*\n\n*Cliente:* ${selectedSolicitud.cliente}\n\n`;
-                selectedSolicitud.items.forEach(item => {
-                    const prodOriginal = products.find(p => p.id === item.id);
-                    const precioBase = prodOriginal ? prodOriginal.price : 0;
-                    const desc = descuentos[item.id] || 0;
-                    const precioFinalUn = precioBase * (1 - desc / 100);
-                    msg += `• *${item.name}*\n  ${item.cantidad} bultos | Neto Un: $${precioFinalUn.toLocaleString()}\n\n`;
-                });
-                msg += `*TOTAL NETO A PAGAR: $ ${totalSolicitudCotizada.toLocaleString()}*`;
-                await db.collection("solicitudes").doc(selectedSolicitud.id).update({ estado: "cotizado" });
-                setSelectedSolicitud(null);
-                window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
 
             return (
+                /* MODIFICADO: Se removió overflow-hidden para permitir el pegado sticky del menú */
                 <div className="max-w-4xl mx-auto md:my-8 bg-white shadow-2xl md:rounded-[2.5rem] flex flex-col min-h-screen md:min-h-0 border-8 border-white relative">
-                    <nav className="bg-slate-900 text-white flex p-1.5 sticky top-0 z-50 shadow-xl md:rounded-t-[1.7rem] no-print">
+                    
+                    {/* NAV FLOTANTE FIJO CORREGIDO (Usa sticky top-0 y z-50 sobre el contenedor limpio) */}
+                    <nav className="bg-slate-900 text-white flex p-1.5 sticky top-0 z-50 shadow-xl md:rounded-t-[1.7rem]">
                         <button onClick={() => setActiveTab('catalogo')} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 transition ${activeTab === 'catalogo' ? 'bg-blue-600 font-extrabold' : 'opacity-70'}`}>
-                            <span className="text-[12px] uppercase font-bold">📂 Catálogo</span>
+                            <i data-lucide="layout-grid" className="w-5 h-5"></i><span className="text-[10px] uppercase font-bold tracking-wider">Catálogo Visual</span>
                         </button>
                         <button onClick={() => setActiveTab('presupuesto')} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 relative transition ${activeTab === 'presupuesto' ? 'bg-blue-600 font-extrabold' : 'opacity-70'}`}>
-                            <span className="text-[12px] uppercase font-bold">🛒 Pedido</span>
-                            {selectedItems.length > 0 && <span className="absolute top-2 right-4 bg-red-600 w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold">{selectedItems.length}</span>}
-                        </button>
-                        <button onClick={() => { if(isLogged) setActiveTab('gestion'); else { if(prompt("Clave:")==='11223344') setIsLogged(true); } }} className={`flex-1 py-4 rounded-2xl flex flex-col items-center gap-1 ${activeTab === 'gestion' ? 'bg-orange-600' : 'opacity-70'}`}>
-                            <span className="text-[12px] uppercase font-bold">⚙️ Admin</span>
+                            <i data-lucide="file-text" className="w-5 h-5"></i><span className="text-[10px] uppercase font-bold tracking-wider">Mi Solicitud</span>
+                            {selectedItems.length > 0 && <span className="absolute top-2 right-4 bg-red-600 w-5 h-5 rounded-full text-[10px] flex items-center justify-center font-bold animate-bounce">{selectedItems.length}</span>}
                         </button>
                     </nav>
 
@@ -300,174 +144,84 @@
                             <section>
                                 <div className="mb-8">
                                     <h1 className="text-4xl font-extrabold text-slate-900">DR-CCS</h1>
-                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">DR Distribuciones - Comedores</p>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Solicitud de Presupuesto Especial</p>
                                 </div>
-                                <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
+                                <input type="text" placeholder="Buscar productos en exposición..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 
                                 <div className="space-y-8">
-                                    {Object.keys(categorizedProducts).map(categoryName => (
-                                        <div key={categoryName} className="space-y-4">
-                                            <h2 className="text-xs font-black text-white bg-blue-600 px-5 py-3 rounded-2xl uppercase tracking-widest shadow-md flex items-center gap-2">
-                                                <span className="w-2 h-2 bg-white rounded-full"></span>{categoryName}
-                                            </h2>
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                                                {categorizedProducts[categoryName].map(p => (
-                                                    <div key={p.id} className="border-2 border-slate-100 rounded-3xl p-4 flex flex-col bg-white shadow-sm justify-between">
-                                                        <div>
-                                                            <div className="w-full h-28 bg-slate-50 rounded-2xl mb-3 flex items-center justify-center overflow-hidden border">
-                                                                {p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-1" /> : <div className="text-slate-300 text-xs">Sin Foto</div>}
+                                    {Object.keys(categorizedProducts).length === 0 ? (
+                                        <p className="text-center text-slate-400 font-bold uppercase py-10">No se encontraron productos</p>
+                                    ) : (
+                                        Object.keys(categorizedProducts).map(categoryName => (
+                                            <div key={categoryName} className="space-y-4">
+                                                
+                                                {/* MODIFICADO: Franja destacada en Azul DR con letras blancas y sombreado */}
+                                                <h2 className="text-xs font-black text-white bg-blue-600 px-5 py-3 rounded-2xl uppercase tracking-widest shadow-md flex items-center gap-2">
+                                                    <span className="w-2 h-2 bg-white rounded-full inline-block"></span>
+                                                    {categoryName}
+                                                </h2>
+                                                
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                                                    {categorizedProducts[categoryName].map(p => (
+                                                        <div key={p.id} className="border-2 border-slate-100 rounded-3xl p-4 flex flex-col bg-white shadow-sm hover:border-blue-200 transition justify-between">
+                                                            <div>
+                                                                <div className="w-full h-28 bg-slate-50 rounded-2xl mb-3 flex items-center justify-center overflow-hidden border">
+                                                                    {p.imageUrl ? (
+                                                                        <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-1" />
+                                                                    ) : (
+                                                                        <i data-lucide="image" className="w-8 h-8 text-slate-300"></i>
+                                                                    )}
+                                                                </div>
+                                                                <h3 className="font-bold text-slate-800 text-sm line-clamp-2 leading-snug mb-1">{p.name}</h3>
+                                                                <p className="text-[11px] text-blue-600 font-extrabold uppercase mb-3">Empaque: Bulto x{p.pack || 1} un.</p>
                                                             </div>
-                                                            <h3 className="font-bold text-slate-800 text-sm line-clamp-2">{p.name}</h3>
-                                                            <p className="text-[12px] text-blue-600 font-bold uppercase mb-2">$ {(p.price || 0).toLocaleString()} un. | Pack x{p.pack || 1}</p>
+                                                            <div className="mt-2">
+                                                                <input type="number" min="0" placeholder="0 bultos" className="w-full p-2 border-2 border-blue-400 bg-slate-50 rounded-xl text-center font-black text-blue-600 outline-none focus:border-blue-600 shadow-sm text-sm" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <input type="number" min="0" placeholder="0 bultos" className="w-full p-2 border-2 border-blue-400 bg-slate-50 rounded-xl text-center font-black text-blue-600 outline-none" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
-                                                            <p className="text-center font-bold text-slate-500 text-[10px] mt-1">Subt: $ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</p>
-                                                        </div>
-                                                    </div>
-                                                ))}
+                                                    ))}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        ))
+                                    )}
                                 </div>
                             </section>
                         )}
 
                         {activeTab === 'presupuesto' && (
                             <section className="space-y-6">
-                                <h2 className="text-2xl font-black text-slate-900">Resumen del Pedido</h2>
-                                {selectedItems.length === 0 ? <p className="text-center py-10 text-slate-300 font-bold uppercase">Pedido vacío</p> : (
+                                <h2 className="text-2xl font-black text-slate-900">Lista de Artículos a Cotizar</h2>
+                                {selectedItems.length === 0 ? <p className="text-center py-20 text-slate-300 font-bold uppercase">No has seleccionado cantidades todavía</p> : (
                                     <>
                                         <div className="bg-white border-2 rounded-3xl overflow-hidden shadow-sm">
                                             {selectedItems.map(p => (
-                                                <div key={p.id} className="flex justify-between p-4 border-b last:border-0">
-                                                    <div><p className="font-bold text-slate-800 text-sm">{p.name}</p><p className="text-[10px] text-slate-500 uppercase">{cart[p.id]} bultos</p></div>
-                                                    <p className="font-black text-slate-900 text-sm">$ {((cart[p.id] || 0) * (p.price || 0) * (p.pack || 1)).toLocaleString()}</p>
+                                                <div key={p.id} className="flex justify-between items-center p-4 border-b last:border-0">
+                                                    <div>
+                                                        <p className="font-bold text-slate-800 text-sm">{p.name}</p>
+                                                        <p className="text-[10px] text-slate-500 font-bold uppercase">{p.category || 'VARIOS'} (Bulto x{p.pack || 1})</p>
+                                                    </div>
+                                                    <span className="bg-blue-50 text-blue-600 font-black px-4 py-2 rounded-xl border border-blue-100 text-sm">{cart[p.id]} bultos</span>
                                                 </div>
                                             ))}
-                                            <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
-                                                <span className="font-bold uppercase text-xs">Total</span><span className="text-2xl font-black">$ {totalGeneral.toLocaleString()}</span>
-                                            </div>
                                         </div>
                                         <div className="grid grid-cols-1 gap-4">
-                                            <input type="text" placeholder="Nombre" className="p-4 bg-slate-50 rounded-2xl border outline-none font-bold" value={nombre} onChange={e => setNombre(e.target.value)} />
-                                            <input type="text" placeholder="Dirección" className="p-4 bg-slate-50 rounded-2xl border outline-none" value={direccion} onChange={e => setDireccion(e.target.value)} />
-                                            <textarea placeholder="Notas..." className="w-full p-4 bg-slate-50 rounded-2xl border h-24 outline-none" value={notas} onChange={e => setNotas(e.target.value)} />
-                                            <div className="grid grid-cols-2 gap-3">
-                                                <button onClick={sendWhatsApp} className="bg-green-600 text-white font-bold p-4 rounded-2xl uppercase text-xs">WhatsApp</button>
-                                                <button onClick={() => printDocument('pedido')} className="bg-slate-800 text-white font-bold p-4 rounded-2xl uppercase text-xs">Guardar PDF</button>
-                                            </div>
+                                            <input type="text" placeholder="Nombre del Comedor / Institución" className="p-4 bg-slate-50 rounded-2xl border outline-none font-bold" value={nombre} onChange={e => setNombre(e.target.value)} />
+                                            <input type="text" placeholder="Dirección de Entrega" className="p-4 bg-slate-50 rounded-2xl border outline-none" value={direccion} onChange={e => setDireccion(e.target.value)} />
+                                            <textarea placeholder="Notas o aclaraciones sobre la entrega..." className="w-full p-4 bg-slate-50 rounded-2xl border h-24 outline-none" value={notas} onChange={e => setNotas(e.target.value)} />
+                                            <button onClick={handleEnviarSolicitud} disabled={enviando} className="w-full bg-blue-600 text-white font-extrabold p-5 rounded-2xl flex items-center justify-center gap-2 uppercase text-sm shadow-lg hover:bg-blue-700 transition disabled:bg-slate-400">
+                                                <i data-lucide="send" className="w-4 h-4"></i> {enviando ? "Enviando al sistema..." : "Enviar Solicitud de Presupuesto"}
+                                            </button>
                                         </div>
                                     </>
                                 )}
-                            </section>
-                        )}
-
-                        {activeTab === 'gestion' && (
-                            <section className="space-y-6">
-                                <div className="bg-white border-2 p-6 rounded-3xl shadow-sm">
-                                    <h3 className="font-black text-slate-800 mb-4 text-xs uppercase tracking-wider">
-                                        {editingProduct ? "📝 Editar Producto Seleccionado" : "➕ Agregar Producto Individual"}
-                                    </h3>
-                                    <form onSubmit={handleSaveProduct} className="grid grid-cols-1 gap-3">
-                                        <input placeholder="Nombre del Producto" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formName} onChange={e => setFormName(e.target.value)} required />
-                                        <input placeholder="Precio (Ej: 1500)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formPrice} onChange={e => setFormPrice(e.target.value)} required />
-                                        <input placeholder="Unidades por Pack (Ej: 1 o 6)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formPack} onChange={e => setFormPack(e.target.value)} required />
-                                        <input placeholder="Categoría (Ej: ALMACEN)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formCategory} onChange={e => setFormCategory(e.target.value)} />
-                                        <input placeholder="Link de Imagen (Opcional)" className="p-3 rounded-xl border text-sm outline-none focus:border-blue-500" value={formImage} onChange={e => setFormImage(e.target.value)} />
-                                        
-                                        <div className="grid grid-cols-2 gap-2 mt-2">
-                                            <button type="submit" className="bg-blue-600 text-white font-bold rounded-xl py-3 uppercase text-xs shadow-md">
-                                                {editingProduct ? "Actualizar" : "Guardar Permanente"}
-                                            </button>
-                                            {editingProduct && (
-                                                <button type="button" onClick={clearForm} className="bg-slate-500 text-white font-bold rounded-xl py-3 uppercase text-xs shadow-md">
-                                                    Cancelar Edición
-                                                </button>
-                                            )}
-                                        </div>
-                                    </form>
-                                </div>
-
-                                <div className="bg-blue-50 p-6 rounded-3xl border-2 border-blue-200">
-                                    <h3 className="font-black text-blue-950 mb-4 uppercase text-xs">Solicitudes Recibidas</h3>
-                                    {selectedSolicitud ? (
-                                        <div className="bg-white p-4 rounded-2xl border space-y-4">
-                                            <h4 className="font-black text-slate-900">{selectedSolicitud.cliente}</h4>
-                                            {selectedSolicitud.items.map(item => {
-                                                const prodOriginal = products.find(p => p.id === item.id);
-                                                const precioBase = prodOriginal ? prodOriginal.price : 0;
-                                                return (
-                                                    <div key={item.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border">
-                                                        <div>
-                                                            <p className="font-bold text-sm">{item.name}</p>
-                                                            <p className="text-xs text-slate-500">Cant: {item.cantidad} bultos</p>
-                                                        </div>
-                                                        <input type="number" placeholder="0" className="w-16 p-1.5 border-2 border-blue-400 rounded-lg text-center font-black text-blue-600" value={descuentos[item.id] || ""} onChange={e => setDescuentos({...descuentos, [item.id]: parseFloat(e.target.value) || 0})} />
-                                                    </div>
-                                                );
-                                            })}
-                                            <button onClick={enviarCotizacionEspecial} className="w-full bg-green-600 text-white font-black p-4 rounded-xl uppercase text-xs">Enviar Cotización</button>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-2">
-                                            {solicitudes.length === 0 ? <p className="text-xs text-slate-400 font-bold uppercase">No hay solicitudes pendientes</p> : solicitudes.map(sol => (
-                                                <div key={sol.id} className="flex justify-between items-center bg-white p-3 rounded-xl border shadow-sm">
-                                                    <div><p className="font-black text-slate-800 text-sm">{sol.cliente}</p></div>
-                                                    <button onClick={() => setSelectedSolicitud(sol)} className="bg-blue-600 text-white font-bold text-xs px-3 py-1.5 rounded-lg">Cotizar</button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className="bg-slate-900 p-6 rounded-3xl text-white flex gap-3">
-                                    <button onClick={() => printDocument('precios')} className="w-full py-4 bg-blue-600 rounded-xl font-black uppercase text-xs">Descargar Lista Precios</button>
-                                </div>
-
-                                <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-100">
-                                    <h3 className="font-black text-orange-900 text-xs uppercase mb-2">Importación Masiva desde Excel</h3>
-                                    <textarea className="w-full h-24 p-4 rounded-2xl border text-xs font-mono outline-none focus:border-orange-400" placeholder="Producto [TAB] Precio [TAB] Pack [TAB] Categoría" value={bulkData} onChange={e => setBulkData(e.target.value)} />
-                                    <button onClick={handleBulkImport} className="w-full bg-slate-900 text-white py-3 rounded-xl mt-2 font-bold uppercase text-xs">Subir Bloque</button>
-                                </div>
-
-                                {/* LISTADO DE CONTROL INTEGRADO PARA ELIMINAR / EDITAR */}
-                                <div className="bg-white border-2 p-6 rounded-3xl shadow-sm">
-                                    <h3 className="font-black text-slate-800 mb-3 text-xs uppercase tracking-wider">📦 Panel de Control de Productos Cargados</h3>
-                                    <input type="text" placeholder="Filtrar productos en admin..." className="w-full p-3 bg-slate-50 border rounded-xl mb-4 text-sm outline-none focus:border-blue-500" value={adminSearch} onChange={e => setAdminSearch(e.target.value)} />
-                                    
-                                    <div className="max-h-96 overflow-y-auto border rounded-xl divide-y bg-slate-50">
-                                        {filteredAdminProducts.length === 0 ? (
-                                            <p className="p-4 text-center text-xs text-slate-400 font-bold uppercase">No se encontraron productos</p>
-                                        ) : filteredAdminProducts.map(p => (
-                                            <div key={p.id} className="p-3 flex items-center justify-between bg-white hover:bg-slate-50 transition">
-                                                <div className="max-w-[70%]">
-                                                    <p className="font-bold text-slate-800 text-sm truncate">{p.name}</p>
-                                                    <p className="text-[11px] font-bold text-blue-600 uppercase">
-                                                        $ {(p.price || 0).toLocaleString()} | Pack x{p.pack || 1} | <span className="text-slate-400">{p.category || 'VARIOS'}</span>
-                                                    </p>
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <button onClick={() => startEdit(p)} className="bg-yellow-500 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg uppercase tracking-wider shadow-sm">
-                                                        Editar
-                                                    </button>
-                                                    <button onClick={() => deleteProduct(p.id, p.name)} className="bg-red-600 text-white font-bold text-[10px] px-2.5 py-1.5 rounded-lg uppercase tracking-wider shadow-sm">
-                                                        Borrar
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
                             </section>
                         )}
                     </div>
                 </div>
             );
         };
-
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render((<App />));
+        root.render(<App />);
     </script>
 </body>
 </html>
