@@ -116,7 +116,7 @@
                 f.reset();
             };
 
-            // MODIFICADO: Importación Masiva de Clientes aceptando Descuento en la 5ta Columna
+            // Importación Masiva de Clientes con Descuento
             const handleBulkClientesImport = async () => {
                 const rows = bulkClientesData.trim().split("\n");
                 const batch = db.batch();
@@ -144,7 +144,7 @@
                 });
                 await batch.commit();
                 setBulkClientesData("");
-                alert("Cartera de clientes importada con sus descuentos vinculados de forma exitosa.");
+                alert("Cartera de clientes importada y vinculada de forma exitosa.");
             };
 
             // Creación de una nueva Lista Comercial
@@ -190,7 +190,7 @@
                 alert(`¡Éxito! Se cargaron los productos y precios específicos dentro de la lista.`);
             };
 
-            // NUEVO: Función para editar en caliente las propiedades de un producto dentro de su lista
+            // Editar propiedades de un producto dentro de su lista
             const handleEditProductoInLista = async (p) => {
                 const nuevoPrecioInput = prompt(`Editar precio para "${p.name}":`, p.price);
                 if (nuevoPrecioInput === null) return;
@@ -212,7 +212,7 @@
                 alert("Producto actualizado correctamente.");
             };
 
-            // Agregar Producto Especial (Temporal) directo a la lista activa
+            // Agregar Producto Especial (Temporal)
             const addTemporalProductToList = () => {
                 if(!activeListaId) return alert("Seleccioná primero una lista.");
                 const name = prompt("Descripción del producto especial:");
@@ -238,7 +238,7 @@
                 alert("Producto especial inyectado en esta lista.");
             };
 
-            // Descarga de PDF de la Lista Seleccionada ordenada alfabéticamente por rubros
+            // Descarga de PDF de la Lista Seleccionada
             const printDocumentLista = () => {
                 if(!activeListaId) return alert("Seleccioná una lista.");
                 const listaActual = listas.find(l => l.id === activeListaId);
@@ -469,7 +469,6 @@
                                                                             {p.es_oferta && <span className="bg-red-100 text-red-600 px-2 py-0.5 text-[9px] rounded-md font-black ml-2 uppercase">🔥 Oferta</span>}
                                                                         </td>
                                                                         <td className="p-4 text-right space-x-3">
-                                                                            {/* MODIFICADO: Agregado botón para editar propiedades en caliente */}
                                                                             <button onClick={() => handleEditProductoInLista(p)} className="text-blue-600 font-bold uppercase text-[11px]">Editar</button>
                                                                             <button onClick={async () => {
                                                                                 if(confirm("¿Eliminar de la lista?")) {
@@ -499,7 +498,7 @@
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(--App /--);
+        root.render(<App />);
     </script>
 </body>
 </html>
