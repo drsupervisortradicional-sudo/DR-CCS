@@ -85,9 +85,10 @@
             }, [clientes]);
 
             const parseMoney = (val) => {
-                if (!val) return 0;
+                if (val === undefined || val === null) return 0;
                 let clean = val.toString().replace("$", "").replace(/\./g, "").replace(",", ".");
-                return parseFloat(clean) || 0;
+                let parsed = parseFloat(clean);
+                return isNaN(parsed) ? 0 : parsed;
             };
 
             const sortedProducts = useMemo(() => {
@@ -114,7 +115,7 @@
                 f.reset();
             };
 
-            // NUEVO: Importación Masiva de Clientes desde Excel
+            // Importación Masiva de Clientes desde Excel
             const handleBulkClientesImport = async () => {
                 const rows = bulkClientesData.trim().split("\n");
                 const batch = db.batch();
@@ -126,10 +127,10 @@
                             nombre: cols[0].trim(),
                             telefono: cols[1].trim().replace("+", ""),
                             direccion: cols[2] ? cols[2].trim() : "",
-                            lista_id: "", // Se inicializa en lista base general
+                            lista_id: "", 
                             descuento_extra: 0,
-                            frecuencia_envio: 7, // 7 días estándar
-                            frecuencia_visita: 14, // 14 días estándar
+                            frecuencia_envio: 7, 
+                            frecuencia_visita: 14, 
                             ultimo_envio: "",
                             ultimo_visita: ""
                         });
@@ -211,9 +212,9 @@
                                 <tr style="background:#f1f5f9;"><td colspan="3" style="padding:10px; font-weight:bold; border:1px solid #ddd; color:#1e3a8a; text-transform:uppercase; font-size:14px;">${cat}</td></tr>
                                 ${sortedProducts.filter(p => (p.category || "VARIOS") === cat && !p.isTemp).map(p => `
                                     <tr>
-                                        <td style="padding:10px; border:1px solid #ddd; text-align:left;">${p.name}</td>
-                                        <td style="padding:10px; text-align:center; border:1px solid #ddd; color:#666;">x${p.pack}</td>
-                                        <td style="padding:10px; text-align:right; border:1px solid #ddd; font-weight:bold;">$ ${p.price_base.toLocaleString()}</td>
+                                        <td style="padding:10px; border-bottom:1px solid #ddd; text-align:left;">${p.name}</td>
+                                        <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd; color:#666;">x${p.pack || 1}</td>
+                                        <td style="padding:10px; text-align:right; border-bottom:1px solid #ddd; font-weight:bold;">$ ${(p.price_base || 0).toLocaleString()}</td>
                                     </tr>
                                 `).join('')}
                             `).join('')}
@@ -267,7 +268,7 @@
                         <button onClick={() => setActiveTab('crm')} className={`flex-1 py-3 text-center rounded-xl transition ${activeTab === 'crm' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-extrabold' : 'text-slate-600'}`}>📊 CRM & Agenda ({agendaHoy.length})</button>
                         <button onClick={() => setActiveTab('clientes')} className={`flex-1 py-3 text-center rounded-xl transition ${activeTab === 'clientes' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-extrabold' : 'text-slate-600'}`}>👥 Cartera Clientes</button>
                         <button onClick={() => setActiveTab('listas')} className={`flex-1 py-3 text-center rounded-xl transition ${activeTab === 'listas' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-extrabold' : 'text-slate-600'}`}>📋 Listas de Precios</button>
-                        <button onClick={() => window.lucide ? "" : setActiveTab('productos')} className={`flex-1 py-3 text-center rounded-xl transition ${activeTab === 'productos' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-extrabold' : 'text-slate-600'}`}>📦 Depósito Productos</button>
+                        <button onClick={() => setActiveTab('productos')} className={`flex-1 py-3 text-center rounded-xl transition ${activeTab === 'productos' ? 'bg-blue-50 text-blue-600 border border-blue-200 font-extrabold' : 'text-slate-600'}`}>📦 Depósito Productos</button>
                     </nav>
 
                     <main className="p-4 md:p-8 max-w-6xl mx-auto w-full flex-1">
@@ -306,7 +307,6 @@
                         {/* TAB 2: CLIENTES */}
                         {activeTab === 'clientes' && (
                             <section className="space-y-6">
-                                {/* NUEVO: Importación Masiva de Clientes idéntica al formato de productos */}
                                 <div className="bg-blue-50 p-6 rounded-3xl border-2 border-blue-100">
                                     <div className="flex justify-between items-center mb-2">
                                         <h3 className="font-black text-blue-900 text-xs uppercase">Importación Masiva de Clientes (Excel)</h3>
@@ -398,7 +398,7 @@
                                                         const mod = listaPreciosInput[p.id] || {};
                                                         return (
                                                             <div key={p.id} className="py-3 flex justify-between items-center gap-2">
-                                                                <div><p className="font-bold text-slate-800">{p.name}</p><p className="text-[10px] text-slate-400">Base: $ {p.price_base.toLocaleString()}</p></div>
+                                                                <div><p className="font-bold text-slate-800">{p.name}</p><p className="text-[10px] text-slate-400">Base: $ ${(p.price_base || 0).toLocaleString()}</p></div>
                                                                 <div className="flex items-center gap-3">
                                                                     <input type="number" placeholder={p.price_base} className="w-24 p-2 border-2 border-blue-300 text-center font-bold text-blue-600 rounded-lg" value={mod.precio_especial || ""} onChange={e => setListaPreciosInput({...listaPreciosInput, [p.id]: {...mod, precio_especial: parseFloat(e.target.value) || undefined}})} />
                                                                     <label className="flex items-center gap-1 font-bold cursor-pointer"><input type="checkbox" checked={!!mod.es_oferta} className="w-4 h-4" onChange={e => setListaPreciosInput({...listaPreciosInput, [p.id]: {...mod, es_oferta: e.target.checked}})} /><span className={mod.es_oferta ? "text-red-500 font-black" : "text-slate-400"}>🔥 Oferta</span></label>
@@ -457,16 +457,20 @@
                                     </div>
 
                                     <div className="lg:col-span-2 bg-white border rounded-3xl shadow-sm overflow-hidden">
-                                        <div className="p-4 bg-slate-50 border-b flex items-center"><input type="text" placeholder="Filtrar inventario maestro..." className="w-full p-2.5 rounded-xl border text-xs outline-none" onChange={e => setSearchTerm(e.target.value)} /></div>
+                                        <div className="p-4 bg-slate-50 border-b flex items-center"><input type="text" placeholder="Filtrar inventario maestro..." className="w-full p-2.5 rounded-xl border text-xs outline-none" onChange={e => setAdminSearch(e.target.value)} /></div>
                                         <table className="w-full text-left border-collapse text-xs">
                                             <thead className="bg-slate-900 text-white text-[10px] uppercase font-bold tracking-wider">
                                                 <tr><th className="p-4">Producto</th><th className="p-4">Precio Base</th><th className="p-4 text-right">Acciones</th></tr>
                                             </thead>
                                             <tbody className="divide-y">
-                                                {sortedProducts.filter(p => (p.name || "").toLowerCase().includes(searchTerm.toLowerCase())).map(p => (
+                                                {sortedProducts.filter(p => (p.name || "").toLowerCase().includes(adminSearch.toLowerCase())).map(p => (
                                                     <tr key={p.id} className="hover:bg-slate-50">
-                                                        <td className="p-4 font-bold text-slate-800">{p.name} <br/><span className="text-[9px] text-blue-500 uppercase font-black">{p.category || 'VARIOS'} — Pack x{p.pack}</span></td>
-                                                        <td className="p-4 font-black text-slate-900">$ {p.price_base.toLocaleString()}</td>
+                                                        <td className="p-4">
+                                                            <span className="font-bold text-slate-800">{p.name}</span>
+                                                            <br/>
+                                                            <span className="text-[9px] text-blue-500 uppercase font-black">{p.category || 'VARIOS'} — Pack x{p.pack || 1}</span>
+                                                        </td>
+                                                        <td className="p-4 font-black text-slate-900">$ ${(p.price_base || 0).toLocaleString()}</td>
                                                         <td className="p-4 text-right space-x-2 font-bold uppercase text-[11px]">
                                                             <button onClick={() => { setEditingProduct(p); window.scrollTo({top:0, behavior:'smooth'}); }} className="text-slate-600">Editar</button>
                                                             <button onClick={() => { if(confirm("¿Eliminar?")) db.collection("v2_productos").doc(p.id).delete(); }} className="text-red-500">Borrar</button>
