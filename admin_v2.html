@@ -4,12 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VentasIQ Master | Panel de Control CRM</title>
-    <!-- Firebase Legacy Scripts -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- React y Babel estables UMD -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -39,31 +36,29 @@
 
         const App = () => {
             const [activeTab, setActiveTab] = useState('crm');
-            const [products, setProducts] = useState([]);
             const [clientes, setClientes] = useState([]);
             const [listas, setListas] = useState([]);
             
+            // Controles de estados
             const [editingCliente, setEditingCliente] = useState(null);
-            const [editingProduct, setEditingProduct] = useState(null);
             const [activeListaId, setActiveListaId] = useState("");
-            const [listaPreciosInput, setListaPreciosInput] = useState({});
             const [bulkData, setBulkData] = useState("");
             const [bulkClientesData, setBulkClientesData] = useState("");
-            const [adminSearch, setAdminSearch] = useState("");
+            const [clienteSearch, setClienteSearch] = useState("");
+            const [listaSearch, setListaSearch] = useState("");
 
+            // Carga de datos en tiempo real
             useEffect(() => {
-                const unsubProds = db.collection("v2_productos").onSnapshot(s => 
-                    setProducts(s.docs.map(d => ({id: d.id, ...d.data()})))
-                );
-                const unsubClientes = db.collection("v2_clientes").onSnapshot(s => 
+                const unsubClientes = db.collection("v3_clientes").onSnapshot(s => 
                     setClientes(s.docs.map(d => ({id: d.id, ...d.data()})))
                 );
-                const unsubListas = db.collection("v2_listas").onSnapshot(s => 
+                const unsubListas = db.collection("v3_listas").onSnapshot(s => 
                     setListas(s.docs.map(d => ({id: d.id, ...d.data()})))
                 );
-                return () => { unsubProds(); unsubClientes(); unsubListas(); };
+                return () => { unsubClientes(); unsubListas(); };
             }, []);
 
+            // CRM: Alertas de Agenda Comercial
             const agendaHoy = useMemo(() => {
                 const hoy = new Date();
                 return clientes.map(c => {
@@ -82,6 +77,18 @@
                 }).filter(c => c.tocaEnvio || c.tocaVisita);
             }, [clientes]);
 
+            // MEJORADO: Buscador inteligente para la Cartera de Clientes (Filtra por nombre, dirección o lista)
+            const clientesFiltrados = useMemo(() => {
+                const query = clienteSearch.toLowerCase().trim();
+                return clientes.filter(c => {
+                    const nombreMatch = (c.nombre || "").toLowerCase().includes(query);
+                    const direccMatch = (c.direccion || "").toLowerCase().includes(query);
+                    const nombreLista = listas.find(l => l.id === c.lista_id)?.nombre_lista || "Base General";
+                    const listaMatch = nombreLista.toLowerCase().includes(query);
+                    return nombreMatch || direccMatch || listaMatch;
+                });
+            }, [clientes, clienteSearch, listas]);
+
             const parseMoney = (val) => {
                 if (val === undefined || val === null) return 0;
                 let clean = val.toString().replace("$", "").replace(/\./g, "").replace(",", ".");
@@ -89,15 +96,12 @@
                 return isNaN(parsed) ? 0 : parsed;
             };
 
-            const sortedProducts = useMemo(() => {
-                return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-            }, [products]);
-
+            // CRUD Clientes Individual
             const handleSaveCliente = async (e) => {
                 e.preventDefault();
                 const f = e.target;
                 const id = editingCliente ? editingCliente.id : "cli_" + Date.now();
-                await db.collection("v2_clientes").doc(id).set({
+                await db.collection("v3_clientes").doc(id).set({
                     nombre: f.c_nombre.value,
                     telefono: f.c_telefono.value,
                     direccion: f.c_direccion.value,
@@ -112,7 +116,7 @@
                 f.reset();
             };
 
-            // MEJORADO: Importador de clientes asocia dinámicamente el nombre de la lista comercial
+            // Importación Masiva de Clientes vinculados a sus Listas por Nombre
             const handleBulkClientesImport = async () => {
                 const rows = bulkClientesData.trim().split("\n");
                 const batch = db.batch();
@@ -124,7 +128,7 @@
                         const nombreListaExcel = cols[3] ? cols[3].trim().toUpperCase() : "";
                         const listaEncontrada = listas.find(l => l.nombre_lista.toUpperCase() === nombreListaExcel);
                         
-                        batch.set(db.collection("v2_clientes").doc(id), {
+                        batch.set(db.collection("v3_clientes").doc(id), {
                             nombre: cols[0].trim(),
                             telefono: cols[1].trim().replace("+", ""),
                             direccion: cols[2] ? cols[2].trim() : "",
@@ -139,104 +143,103 @@
                 });
                 await batch.commit();
                 setBulkClientesData("");
-                alert("Importación masiva de clientes asociada con sus listas completada.");
+                alert("Cartera de clientes importada y vinculada.");
             };
 
-            const handleSaveProduct = async (e) => {
-                e.preventDefault();
-                const f = e.target;
-                const id = editingProduct ? editingProduct.id : "prod_" + Date.now();
-                await db.collection("v2_productos").doc(id).set({
-                    name: f.p_name.value,
-                    price_base: parseMoney(f.p_price.value),
-                    pack: parseInt(f.p_pack.value) || 1,
-                    category: (f.p_category.value || "VARIOS").toUpperCase().trim(),
-                    imageUrl: f.p_image.value || ""
+            // Creación de una nueva Lista Comercial
+            const handleCreateLista = async () => {
+                const nombre = prompt("Nombre de la nueva Lista de Precios (Ej: MAYORISTA, SUPERMERCADOS):");
+                if(!nombre) return;
+                const id = "lista_" + Date.now();
+                await db.collection("v3_listas").doc(id).set({
+                    nombre_lista: nombre.toUpperCase().trim(),
+                    productos: []
                 });
-                setEditingProduct(null);
-                f.reset();
             };
 
-            const addTemporalProduct = () => {
-                const name = prompt("Descripción del producto:");
+            // NUEVO: Importación masiva de Productos DIRECTO adentro de la Lista seleccionada
+            const handleBulkProductosListaImport = async () => {
+                if(!activeListaId) {
+                    alert("⚠️ Por favor, seleccioná primero una Lista de la izquierda para poder inyectarle el Excel.");
+                    return;
+                }
+
+                const rows = bulkData.trim().split("\n");
+                const listaActual = listas.find(l => l.id === activeListaId);
+                let productosActuales = listaActual?.productos ? [...listaActual.productos] : [];
+
+                rows.forEach(row => {
+                    const cols = row.split("\t");
+                    if (cols.length >= 2) {
+                        const prodId = "prod_" + (Date.now() + Math.random()).toString().replace(".","");
+                        productosActuales.push({
+                            id: prodId,
+                            name: cols[0].trim(),
+                            price: parseMoney(cols[1]),
+                            pack: parseInt(cols[2]) || 1,
+                            category: (cols[3] || "VARIOS").trim().toUpperCase(),
+                            imageUrl: cols[4] ? cols[4].trim() : "",
+                            es_oferta: cols[5] ? cols[5].trim().toUpperCase() === "SI" : false
+                        });
+                    }
+                });
+
+                await db.collection("v3_listas").doc(activeListaId).update({
+                    productos: productosActuales
+                });
+
+                setBulkData("");
+                alert(`¡Éxito! Se cargaron los productos y precios específicos dentro de la lista.`);
+            };
+
+            // NUEVO: Agregar Producto Especial (Temporal) directo a la lista activa
+            const addTemporalProductToList = () => {
+                if(!activeListaId) return alert("Seleccioná primero una lista.");
+                const name = prompt("Descripción del producto especial:");
                 const priceInput = prompt("Precio unitario:");
                 if (!name || !priceInput) return;
                 const price = parseMoney(priceInput);
                 const pack = parseInt(prompt("Unidades por bulto:")) || 1;
-                const tempId = "temp_" + Date.now();
                 
-                db.collection("v2_productos").doc(tempId).set({
+                const listaActual = listas.find(l => l.id === activeListaId);
+                let productosActuales = listaActual?.productos ? [...listaActual.productos] : [];
+                
+                productosActuales.push({
+                    id: "temp_" + Date.now(),
                     name: "(ESPECIAL) " + name,
-                    price_base: price,
+                    price: price,
                     pack: pack,
                     category: "ESPECIALES",
+                    es_oferta: false,
                     isTemp: true
                 });
-                alert("Producto especial agregado.");
+
+                db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
+                alert("Producto especial inyectado en esta lista.");
             };
 
-            // MEJORADO: Importador de productos tilda ofertas y variaciones en la lista seleccionada al vuelo
-            const handleBulkImport = async () => {
-                if(!activeListaId) {
-                    alert("⚠️ Por favor, andá primero a la pestaña 'Listas de Precios' y seleccioná qué lista querés cargar/modificar con este Excel.");
-                    return;
-                }
-                const rows = bulkData.trim().split("\n");
-                const batch = db.batch();
-                let nuevasModificaciones = { ...listaPreciosInput };
-
-                rows.forEach(row => {
-                    const cols = row.split("\t");
-                    if (cols.length >= 3) {
-                        const id = "prod_" + (Date.now() + Math.random()).toString().replace(".","");
-                        const nombreProd = cols[0].trim();
-                        const precioBase = parseMoney(cols[1]);
-                        const packVal = parseInt(cols[2]) || 1;
-                        const catVal = (cols[3] || "VARIOS").trim().toUpperCase();
-                        const imgUrl = cols[4] ? cols[4].trim() : "";
-                        const precioEspecialExcel = cols[5] ? parseMoney(cols[5]) : undefined;
-                        const esOfertaExcel = cols[6] ? cols[6].trim().toUpperCase() === "SI" : false;
-
-                        batch.set(db.collection("v2_productos").doc(id), {
-                            name: nombreProd,
-                            price_base: precioBase,
-                            pack: packVal,
-                            category: catVal,
-                            imageUrl: imgUrl
-                        });
-
-                        if (precioEspecialExcel !== undefined || esOfertaExcel) {
-                            nuevasModificaciones[id] = {
-                                precio_especial: precioEspecialExcel,
-                                es_oferta: esOfertaExcel
-                            };
-                        }
-                    }
-                });
-
-                await batch.commit();
-                await db.collection("v2_listas").doc(activeListaId).update({ modificaciones: nuevasModificaciones });
-                setBulkData("");
-                setListaPreciosInput(nuevasModificaciones);
-                alert("Productos cargados y mapeados automáticamente en la lista seleccionada.");
-            };
-
-            const printDocument = () => {
+            // Descarga de PDF de la Lista Seleccionada ordenada alfabéticamente por rubros
+            const printDocumentLista = () => {
+                if(!activeListaId) return alert("Seleccioná una lista.");
+                const listaActual = listas.find(l => l.id === activeListaId);
                 const fecha = new Date().toLocaleDateString();
-                const categories = [...new Set(sortedProducts.filter(p => !p.isTemp).map(p => p.category || "VARIOS"))].sort();
+                
+                const prodsLista = listaActual?.productos || [];
+                const prodsOrdenados = [...prodsLista].sort((a,b) => (a.name || "").localeCompare(b.name || ""));
+                const categories = [...new Set(prodsOrdenados.map(p => p.category || "VARIOS"))].sort();
                 
                 const bodyContent = `
                     <div style="font-family: sans-serif; padding: 10px;">
-                        <h1 style="color: #1e3a8a; text-align: center; margin-bottom: 2px;">LISTA DE PRECIOS OFICIAL</h1>
+                        <h1 style="color: #1e3a8a; text-align: center; margin-bottom: 2px; text-transform: uppercase;">LISTA DE PRECIOS: ${listaActual.nombre_lista}</h1>
                         <p style="text-align: center; margin-top: 0; color: #475569;">DR DISTRIBUCIONES ROSARIO | ${fecha}</p>
                         <table style="width:100%; border-collapse:collapse; margin-top: 20px;">
                             ${categories.map(cat => `
                                 <tr style="background:#f1f5f9;"><td colspan="3" style="padding:10px; font-weight:bold; border:1px solid #ddd; color:#1e3a8a; text-transform:uppercase; font-size:14px;">${cat}</td></tr>
-                                ${sortedProducts.filter(p => (p.category || "VARIOS") === cat && !p.isTemp).map(p => `
+                                ${prodsOrdenados.filter(p => (p.category || "VARIOS") === cat).map(p => `
                                     <tr>
-                                        <td style="padding:10px; border-bottom:1px solid #ddd; text-align:left;">${p.name}</td>
+                                        <td style="padding:10px; border-bottom:1px solid #ddd; text-align:left;">${p.name} ${p.es_oferta ? '<span style="color:red;font-weight:bold;">[OFERTA]</span>':''}</td>
                                         <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd; color:#000;">x${p.pack || 1}</td>
-                                        <td style="padding:10px; text-align:right; border-bottom:1px solid #ddd; font-weight:bold; color:#000;">$ ${(p.price_base || 0).toLocaleString()}</td>
+                                        <td style="padding:10px; text-align:right; border-bottom:1px solid #ddd; font-weight:bold; color:#000;">$ ${(p.price || 0).toLocaleString()}</td>
                                     </tr>
                                 `).join('')}
                             `).join('')}
@@ -258,22 +261,10 @@
                 }, 1000);
             };
 
-            const handleCreateLista = async () => {
-                const nombre = prompt("Nombre de la lista (Ej: CONTADO, CTA CTE):");
-                if(!nombre) return;
-                const id = "lista_" + Date.now();
-                await db.collection("v2_listas").doc(id).set({ nombre_lista: nombre.toUpperCase().trim(), modificaciones: {} });
-            };
-
-            const handleSavePreciosLista = async (listaId) => {
-                await db.collection("v2_listas").doc(listaId).update({ modificaciones: listaPreciosInput });
-                alert("Cambios de precios guardados en la matriz.");
-            };
-
-            const registrarEnvioWsp = async (cliente) => {
+            const registrarEnvioWsp = (cliente) => {
                 const linkPersonalizado = `${window.location.origin}${window.location.pathname.replace('admin_v2.html', 'cliente_v2.html')}?id=${cliente.id}`;
-                const msg = `Hola *${cliente.nombre}*! Te dejamos nuestro catálogo actualizado con tus ofertas exclusivas y precios vigentes. Armá tu pedido directamente acá: ${linkPersonalizado}`;
-                await db.collection("v2_clientes").doc(cliente.id).update({ ultimo_envio: new Date().toISOString().split('T')[0] });
+                const msg = `Hola *${cliente.nombre}*! Te dejamos nuestro catálogo de pedidos actualizado con tus ofertas exclusivas. Armá tu pedido ingresando acá: ${linkPersonalizado}`;
+                db.collection("v3_clientes").doc(cliente.id).update({ ultimo_envio: new Date().toISOString().split('T')[0] });
                 window.open(`https://wa.me/${cliente.telefono}?text=${encodeURIComponent(msg)}`);
             };
 
@@ -281,17 +272,15 @@
                 <div className="min-h-screen flex flex-col bg-slate-200 text-slate-950 font-medium">
                     <header className="bg-slate-950 text-white p-6 shadow-xl flex justify-between items-center border-b-4 border-blue-600">
                         <div>
-                            <h1 className="text-3xl font-black tracking-tight text-blue-400">VentasIQ Master <span className="text-white text-xs px-3 py-1 bg-blue-600 rounded-md ml-2 font-bold uppercase tracking-widest">CRM v2</span></h1>
-                            <p className="text-sm text-slate-300 font-bold mt-0.5">Control Corporativo Multilista — DR Distribuciones</p>
+                            <h1 className="text-3xl font-black tracking-tight text-blue-400">VentasIQ Master <span className="text-white text-xs px-3 py-1 bg-blue-600 rounded-md ml-2 font-bold uppercase tracking-widest">CRM v3</span></h1>
+                            <p className="text-sm text-slate-300 font-bold mt-0.5">Control Comercial de Listas Independientes — DR Distribuciones</p>
                         </div>
                     </header>
 
-                    {/* Navbar Reforzada */}
                     <nav className="bg-white border-b-4 border-slate-300 flex p-2 sticky top-0 z-40 shadow-md text-xs font-black uppercase tracking-wider">
                         <button onClick={() => setActiveTab('crm')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'crm' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📊 CRM & Agenda ({agendaHoy.length})</button>
-                        <button onClick={() => setActiveTab('clientes')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'clientes' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>👥 Cartera Clientes</button>
-                        <button onClick={() => setActiveTab('listas')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'listas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📋 Listas de Precios</button>
-                        <button onClick={() => setActiveTab('productos')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'productos' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📦 Depósito Productos</button>
+                        <button onClick={() => setActiveTab('clientes')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'clientes' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>👥 Cartera Clientes ({clientes.length})</button>
+                        <button onClick={() => setActiveTab('listas')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'listas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📋 Gestión de Listas de Precios</button>
                     </nav>
 
                     <main className="p-4 md:p-8 max-w-6xl mx-auto w-full flex-1">
@@ -302,22 +291,22 @@
                                 <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-lg p-6">
                                     <h3 className="font-black text-slate-950 mb-4 uppercase text-xs tracking-widest text-blue-900 border-b pb-2">Hojas de Ruta y Envíos Pendientes</h3>
                                     {agendaHoy.length === 0 ? (
-                                        <p className="text-center py-10 text-base text-slate-500 font-black uppercase">🎉 Cartera al día de visitas y envíos.</p>
+                                        <p className="text-center py-10 text-base text-slate-500 font-black uppercase">🎉 Agenda comercial al día.</p>
                                     ) : (
                                         <div className="divide-y-2 divide-slate-200">
                                             {agendaHoy.map(c => (
                                                 <div key={c.id} className="py-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
                                                     <div>
                                                         <h4 className="font-black text-slate-950 text-base">{c.nombre}</h4>
-                                                        <p className="text-xs text-slate-800 font-bold">📍 {c.direccion || 'Sin dirección'}</p>
+                                                        <p className="text-xs text-slate-800 font-bold">📍 {c.direccion || 'Sin dirección'} | 📋 {listas.find(l=>l.id===c.lista_id)?.nombre_lista || "Base"}</p>
                                                         <div className="flex gap-2 mt-2">
-                                                            {c.tocaEnvio && <span className="bg-green-200 text-green-950 font-black text-[10px] px-2.5 py-1 rounded-md border border-green-400 uppercase">📋 Toca Catálogo</span>}
-                                                            {c.tocaVisita && <span className="bg-purple-200 text-purple-950 font-black text-[10px] px-2.5 py-1 rounded-md border border-purple-400 uppercase">🚗 Toca Visita</span>}
+                                                            {c.tocaEnvio && <span className="bg-green-200 text-green-950 font-black text-[10px] px-2.5 py-1 rounded-md border border-green-400 uppercase">📋 Catálogo Pendiente</span>}
+                                                            {c.tocaVisita && <span className="bg-purple-200 text-purple-950 font-black text-[10px] px-2.5 py-1 rounded-md border border-purple-400 uppercase">🚗 Visita Requerida</span>}
                                                         </div>
                                                     </div>
                                                     <div className="flex gap-2">
                                                         <button onClick={() => registrarEnvioWsp(c)} className="bg-green-600 hover:bg-green-700 text-white font-black text-xs px-5 py-3 rounded-xl shadow-md uppercase tracking-wider">💬 WhatsApp</button>
-                                                        <button onClick={async () => { await db.collection("v2_clientes").doc(c.id).update({ ultimo_visita: new Date().toISOString().split('T')[0] }); }} className="bg-slate-900 hover:bg-black text-white font-black text-xs px-5 py-3 rounded-xl shadow-md uppercase tracking-wider">🚗 Visitar</button>
+                                                        <button onClick={async () => { await db.collection("v3_clientes").doc(c.id).update({ ultimo_visita: new Date().toISOString().split('T')[0] }); }} className="bg-slate-900 text-white font-black text-xs px-5 py-3 rounded-xl shadow-md uppercase tracking-wider">🚗 Visitar</button>
                                                     </div>
                                                 </div>
                                             ))}
@@ -327,66 +316,69 @@
                             </section>
                         )}
 
-                        {/* TAB 2: CLIENTES */}
+                        {/* TAB 2: CARTERA CLIENTES */}
                         {activeTab === 'clientes' && (
                             <section className="space-y-6">
-                                {/* IMPORTADOR CLIENTES REFORZADO */}
                                 <div className="bg-blue-50 p-6 rounded-3xl border-2 border-blue-400 shadow-md">
                                     <div className="flex justify-between items-center mb-2">
                                         <h3 className="font-black text-blue-950 text-sm uppercase tracking-wider">📋 Importación Masiva de Clientes (Excel)</h3>
-                                        <button onClick={async () => { if(confirm("¿Borrar toda la cartera?")) db.collection("v2_clientes").get().then(s=>s.forEach(d=>d.ref.delete())); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-red-800 hover:bg-red-700 transition shadow-md">🗑️ Vaciar Cartera</button>
+                                        <button onClick={async () => { if(confirm("¿Vaciar clientes?")) db.collection("v3_clientes").get().then(s=>s.forEach(d=>d.ref.delete())); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-red-800">🗑️ Vaciar Cartera</button>
                                     </div>
-                                    <p className="text-xs text-blue-950 font-bold mb-2">Pega tus celdas desde Excel respetando estrictamente este orden con las 4 columnas:</p>
                                     <div className="bg-blue-950 p-3 rounded-xl border-2 border-slate-950 font-mono text-[11px] font-black text-cyan-400 mb-3 text-center tracking-wide shadow-inner">
-                                        Nombre Cliente [TAB] WhatsApp (Ej: 5493416384086) [TAB] Dirección [TAB] Nombre de Lista (Ej: CONTADO)
+                                        Nombre Cliente [TAB] WhatsApp (Con 549...) [TAB] Dirección [TAB] Nombre exacto de la Lista (Ej: MAYORISTA)
                                     </div>
-                                    <textarea className="w-full h-24 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none focus:border-blue-600 shadow-inner bg-white text-slate-950 font-bold" placeholder="Pega filas de Excel aquí..." value={bulkClientesData} onChange={e => setBulkClientesData(e.target.value)} />
-                                    <button onClick={handleBulkClientesImport} className="w-full bg-slate-950 hover:bg-black text-white py-3.5 rounded-xl mt-2 font-black uppercase text-xs tracking-widest border-b-4 border-slate-800 shadow-md">Subir Cartera de Clientes Vinculada</button>
+                                    <textarea className="w-full h-24 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pega clientes desde Excel..." value={bulkClientesData} onChange={e => setBulkClientesData(e.target.value)} />
+                                    <button onClick={handleBulkClientesImport} className="w-full bg-slate-950 text-white py-3.5 rounded-xl mt-2 font-black uppercase text-xs tracking-widest shadow-md">Subir Cartera de Clientes Vinculada</button>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                                     <div className="lg:col-span-1 bg-white p-6 border-2 border-slate-400 rounded-3xl shadow-md h-fit text-xs font-bold">
-                                        <h3 className="font-black text-slate-950 mb-4 uppercase text-xs text-blue-900 border-b pb-1">{editingCliente ? "📝 Editar Cliente" : "👤 Registrar Cliente Individual"}</h3>
+                                        <h3 className="font-black text-slate-950 mb-4 uppercase text-xs text-blue-900 border-b pb-1">{editingCliente ? "📝 Editar Ficha" : "👤 Registrar Cliente Individual"}</h3>
                                         <form onSubmit={handleSaveCliente} className="space-y-3">
                                             <div><label className="text-slate-950 block mb-1">Razón Social</label><input name="c_nombre" defaultValue={editingCliente?.nombre} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
                                             <div><label className="text-slate-950 block mb-1">WhatsApp</label><input name="c_telefono" defaultValue={editingCliente?.telefono} placeholder="549341..." className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
                                             <div><label className="text-slate-950 block mb-1">Dirección</label><input name="c_direccion" defaultValue={editingCliente?.direccion} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
                                             <div>
-                                                <label className="text-slate-950 block mb-1">Asignar Lista Manual</label>
+                                                <label className="text-slate-950 block mb-1">Vincular a Lista Comercial</label>
                                                 <select name="c_lista" defaultValue={editingCliente?.lista_id} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-black text-slate-950">
-                                                    <option value="">-- LISTA BASE GENERAL --</option>
+                                                    <option value="">-- SELECCIONÁ LA LISTA --</option>
                                                     {listas.map(l => <option key={l.id} value={l.id}>{l.nombre_lista}</option>)}
                                                 </select>
                                             </div>
-                                            <div><label className="text-slate-950 block mb-1">Descuento Extra (%)</label><input type="number" step="0.1" name="c_desc" defaultValue={editingCliente?.descuento_extra} placeholder="0" className="w-full p-3 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-600 text-sm" /></div>
+                                            <div><label className="text-slate-950 block mb-1">Descuento Extra Ficha (%)</label><input type="number" step="0.1" name="c_desc" defaultValue={editingCliente?.descuento_extra} placeholder="0" className="w-full p-3 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-600 text-sm" /></div>
                                             <div className="grid grid-cols-2 gap-2">
                                                 <div><label className="text-slate-950 block mb-1">Catálogo (Días)</label><input type="number" name="c_frec_envio" defaultValue={editingCliente?.frecuencia_envio || 7} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
                                                 <div><label className="text-slate-950 block mb-1">Visita (Días)</label><input type="number" name="c_frec_visita" defaultValue={editingCliente?.frecuencia_visita || 14} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
                                             </div>
-                                            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white p-3.5 rounded-xl font-black uppercase mt-2 shadow-md tracking-wider">Guardar Ficha</button>
+                                            <button type="submit" className="w-full bg-blue-600 text-white p-3.5 rounded-xl font-black uppercase mt-2 shadow-md">Guardar Cliente</button>
                                         </form>
                                     </div>
+
                                     <div className="lg:col-span-2 bg-white border-2 border-slate-400 rounded-3xl shadow-md overflow-hidden">
+                                        {/* NUEVO: Buscador inteligente para la Cartera de Clientes */}
+                                        <div className="p-4 bg-slate-100 border-b-2 border-slate-300 shadow-inner flex items-center">
+                                            <input type="text" placeholder="🔍 Buscar clientes por nombre, dirección o lista asignada..." className="w-full p-3 border-2 border-slate-950 rounded-xl text-xs font-bold text-slate-950 outline-none" value={clienteSearch} onChange={e => setClienteSearch(e.target.value)} />
+                                        </div>
                                         <table className="w-full text-left border-collapse text-xs">
                                             <thead className="bg-slate-950 text-white text-[10px] uppercase font-bold tracking-widest">
-                                                <tr><th className="p-4">Cliente / Condiciones</th><th className="p-4 text-right">Acciones</th></tr>
+                                                <tr><th className="p-4">Cliente / Regla Comercial</th><th className="p-4 text-right">Acciones</th></tr>
                                             </thead>
                                             <tbody className="divide-y-2 divide-slate-100 font-bold">
-                                                {clientes.map(c => (
+                                                {clientesFiltrados.map(c => (
                                                     <tr key={c.id} className="hover:bg-slate-50">
                                                         <td className="p-4">
                                                             <div className="font-black text-slate-950 text-base">{c.nombre}</div>
-                                                            <div className="text-blue-900 font-extrabold mt-0.5">📋 {listas.find(l=>l.id===c.lista_id)?.nombre_lista || "Base General"} {c.descuento_extra > 0 && `(-${c.descuento_extra}%)`}</div>
-                                                            <div className="text-slate-600 text-[11px] mt-0.5">📍 {c.direccion || 'Sin direcc.'}</div>
+                                                            <div className="text-blue-900 font-extrabold mt-0.5">📋 Lista: {listas.find(l=>l.id===c.lista_id)?.nombre_lista || "No asignada"} {c.descuento_extra > 0 && `(-${c.descuento_extra}%)`}</div>
+                                                            <div className="text-slate-600 text-[11px] mt-0.5">📍 {c.direccion || 'Sin direcc.'} | 📞 {c.telefono}</div>
                                                         </td>
                                                         <td className="p-4 text-right space-x-3 font-black uppercase text-xs">
                                                             <button onClick={() => {
                                                                 const link = `${window.location.origin}${window.location.pathname.replace('admin_v2.html', 'cliente_v2.html')}?id=${c.id}`;
                                                                 navigator.clipboard.writeText(link);
                                                                 alert("¡Link copiado!");
-                                                            }} className="text-blue-600 hover:text-blue-800">🔗 Link</button>
-                                                            <button onClick={() => setEditingCliente(c)} className="text-slate-700 hover:text-black">Editar</button>
-                                                            <button onClick={() => { if(confirm("¿Eliminar?")) db.collection("v2_clientes").doc(c.id).delete(); }} className="text-red-600 hover:text-red-800">Borrar</button>
+                                                            }} className="text-blue-600 hover:underline">🔗 Link</button>
+                                                            <button onClick={() => setEditingCliente(c)} className="text-slate-700">Editar</button>
+                                                            <button onClick={() => { if(confirm("¿Eliminar?")) db.collection("v3_clientes").doc(c.id).delete(); }} className="text-red-500">Borrar</button>
                                                         </td>
                                                     </tr>
                                                 ))}
@@ -397,114 +389,89 @@
                             </section>
                         )}
 
-                        {/* TAB 3: LISTAS */}
+                        {/* TAB 3: GESTION DE LISTAS INDEPENDIENTES */}
                         {activeTab === 'listas' && (
                             <section className="space-y-6">
                                 <div className="flex justify-between items-center bg-white p-4 border-2 border-slate-400 rounded-2xl shadow-md">
-                                    <div><h3 className="font-black text-slate-950 text-sm uppercase tracking-wider">Listas y Ofertas Activas</h3></div>
+                                    <div>
+                                        <h3 className="font-black text-slate-950 text-sm uppercase tracking-wider">Módulo de Listas de Precios Independientes</h3>
+                                        <p className="text-xs text-slate-600 font-bold mt-0.5">Cada lista contiene sus propios productos cargados desde Excel de forma autónoma.</p>
+                                    </div>
                                     <button onClick={handleCreateLista} className="bg-blue-600 text-white font-black text-xs px-5 py-3 rounded-xl uppercase tracking-wider shadow-md">➕ Crear Nueva Lista</button>
                                 </div>
+
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    {/* Selector lateral de listas */}
                                     <div className="md:col-span-1 bg-white border-2 border-slate-400 rounded-2xl p-4 space-y-2 shadow-md">
+                                        <h4 className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Seleccionar Lista:</h4>
                                         {listas.map(l => (
-                                            <button key={l.id} onClick={() => { setActiveListaId(l.id); setListaPreciosInput(l.modificaciones || {}); }} className={`w-full text-left p-3.5 rounded-xl font-black text-xs transition uppercase tracking-wider ${activeListaId === l.id ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 border border-slate-300 text-slate-900 hover:bg-slate-200'}`}>📦 {l.nombre_lista}</button>
+                                            <button key={l.id} onClick={() => setActiveListaId(l.id)} className={`w-full text-left p-3.5 rounded-xl font-black text-xs transition uppercase tracking-wider ${activeListaId === l.id ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 border border-slate-300 text-slate-900 hover:bg-slate-200'}`}>📦 {l.nombre_lista} ({l.productos?.length || 0} items)</button>
                                         ))}
                                     </div>
-                                    <div className="md:col-span-3 bg-white border-2 border-slate-400 rounded-2xl p-6 shadow-md">
+
+                                    {/* Contenedor e importador de la lista seleccionada */}
+                                    <div className="md:col-span-3 space-y-4">
                                         {activeListaId ? (
-                                            <div>
-                                                <div className="flex justify-between items-center border-b-2 pb-4 mb-4">
-                                                    <h3 className="font-black text-blue-900 text-xs uppercase tracking-widest">Matriz: {listas.find(l=>l.id===activeListaId)?.nombre_lista}</h3>
-                                                    <button onClick={() => handleSavePreciosLista(activeListaId)} className="bg-green-600 text-white font-black text-xs px-5 py-2.5 rounded-xl uppercase shadow-md">Clar cerrar 💾 Guardar Cambios</button>
+                                            <>
+                                                {/* IMPORTADOR DE EXCEL MOVIDO ADENTRO DE CADA LISTA */}
+                                                <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-400 shadow-md">
+                                                    <div className="flex justify-between items-center mb-2">
+                                                        <h3 className="font-black text-orange-950 text-sm uppercase tracking-wider">📥 Inyectar Excel de Productos a: <span className="text-blue-700">{listas.find(l=>l.id===activeListaId)?.nombre_lista}</span></h3>
+                                                        <button onClick={async () => { if(confirm("¿Vaciar esta lista?")) await db.collection("v3_listas").doc(activeListaId).update({productos: []}); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-3 py-1.5 rounded-lg border border-red-800">Vaciar Lista</button>
+                                                    </div>
+                                                    <div className="bg-orange-950 p-3 rounded-xl border-2 border-slate-950 font-mono text-[11px] font-black text-yellow-400 mb-3 text-center shadow-inner">
+                                                        Producto [TAB] Precio Especifico [TAB] Pack [TAB] Categoría [TAB] Imagen URL [TAB] Oferta (Escribir SI o dejar vacío)
+                                                    </div>
+                                                    <textarea className="w-full h-20 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pegá acá las celdas de tu Excel para esta lista..." value={bulkData} onChange={e => setBulkData(e.target.value)} />
+                                                    <div className="flex gap-2 mt-2 font-black text-xs">
+                                                        <button onClick={handleBulkProductosListaImport} className="flex-1 bg-slate-950 text-white py-3 rounded-xl shadow-md uppercase tracking-wider">Subir e Inyectar Excel a esta Lista</button>
+                                                        <button onClick={addTemporalProductToList} className="bg-purple-600 text-white px-4 rounded-xl uppercase shadow-md">✨ Producto Especial</button>
+                                                        <button onClick={printDocumentLista} className="bg-blue-600 text-white px-4 rounded-xl uppercase shadow-md">📄 Imprimir PDF</button>
+                                                    </div>
                                                 </div>
-                                                <div className="max-h-[400px] overflow-y-auto divide-y-2 divide-slate-100 pr-2 text-xs font-bold">
-                                                    {sortedProducts.map(p => {
-                                                        const mod = listaPreciosInput[p.id] || {};
-                                                        return (
-                                                            <div key={p.id} className="py-3 flex justify-between items-center gap-2">
-                                                                <div><p className="font-black text-slate-900 text-sm">{p.name}</p><p className="text-[11px] text-slate-600 font-extrabold">Base: $ ${(p.price_base || 0).toLocaleString()}</p></div>
-                                                                <div className="flex items-center gap-4">
-                                                                    <input type="number" placeholder={p.price_base} className="w-24 p-2 border-2 border-slate-900 text-center font-black text-blue-600 rounded-lg text-sm bg-slate-50" value={mod.precio_especial || ""} onChange={e => setListaPreciosInput({...listaPreciosInput, [p.id]: {...mod, precio_especial: parseFloat(e.target.value) || undefined}})} />
-                                                                    <label className="flex items-center gap-1 font-black cursor-pointer select-none"><input type="checkbox" checked={!!mod.es_oferta} className="w-4 h-4 text-blue-600" onChange={e => setListaPreciosInput({...listaPreciosInput, [p.id]: {...mod, es_oferta: e.target.checked}})} /><span className={mod.es_oferta ? "text-red-600 font-black text-sm":"text-slate-400"}>🔥 Oferta</span></label>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
+
+                                                {/* Tabla de revisión de ítems de esta lista */}
+                                                <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-md overflow-hidden">
+                                                    <div className="p-3 bg-slate-100 border-b flex items-center">
+                                                        <input type="text" placeholder="Filtrar productos de esta lista..." className="w-full p-2.5 rounded-xl border-2 border-slate-950 bg-white font-bold text-xs" onChange={e => setListaSearch(e.target.value)} />
+                                                    </div>
+                                                    <table className="w-full text-left border-collapse text-xs">
+                                                        <thead className="bg-slate-950 text-white text-[10px] uppercase font-bold tracking-widest">
+                                                            <tr><th className="p-4">Producto</th><th className="p-4">Precio Lista</th><th className="p-4 text-right">Acción</th></tr>
+                                                        </thead>
+                                                        <tbody className="divide-y font-bold">
+                                                            {(listas.find(l=>l.id===activeListaId)?.productos || [])
+                                                                .filter(p => (p.name || "").toLowerCase().includes(listaSearch.toLowerCase()))
+                                                                .map((p, idx) => (
+                                                                    <tr key={p.id || idx} className="hover:bg-slate-50">
+                                                                        <td className="p-4">
+                                                                            <span className="font-black text-slate-950 text-base">{p.name}</span>
+                                                                            <br/>
+                                                                            <span className="text-[10px] text-blue-600 uppercase font-black">{p.category} — Pack x{p.pack}</span>
+                                                                        </td>
+                                                                        <td className="p-4 text-sm font-black text-slate-950">
+                                                                            $ {(p.price || 0).toFixed(2)}
+                                                                            {p.es_oferta && <span className="bg-red-100 text-red-600 px-2 py-0.5 text-[9px] rounded-md font-black ml-2 uppercase">🔥 Oferta</span>}
+                                                                        </td>
+                                                                        <td className="p-4 text-right">
+                                                                            <button onClick={async () => {
+                                                                                if(confirm("¿Eliminar de la lista?")) {
+                                                                                    const nuevaListaProds = listas.find(l=>l.id===activeListaId).productos.filter(item => item.id !== p.id);
+                                                                                    await db.collection("v3_listas").doc(activeListaId).update({productos: nuevaListaProds});
+                                                                                }
+                                                                            }} className="text-red-500 font-bold uppercase text-[11px]">Borrar</button>
+                                                                        </td>
+                                                                    </tr>
+                                                            ))}
+                                                        </tbody>
+                                                    </table>
                                                 </div>
+                                            </>
+                                        ) : (
+                                            <div className="bg-white border-2 border-slate-400 rounded-3xl p-20 text-center text-slate-500 font-black uppercase text-xs">
+                                                👈 Seleccioná una Lista de Precios del panel izquierdo para cargarle mercadería o revisarla.
                                             </div>
-                                        ) : <p className="text-center text-slate-500 font-black py-10 text-xs uppercase">👈 Seleccioná una lista comercial de la izquierda.</p>}
-                                    </div>
-                                </div>
-                            </section>
-                        )}
-
-                        {/* TAB 4: PRODUCTOS */}
-                        {activeTab === 'productos' && (
-                            <section className="space-y-6">
-                                <div className="bg-slate-950 p-6 rounded-3xl text-white shadow-xl flex flex-col md:flex-row gap-4 justify-between items-center border-b-4 border-blue-600">
-                                    <div>
-                                        <h3 className="font-black uppercase text-xs tracking-widest text-blue-400">Herramientas del Catálogo</h3>
-                                        <p className="text-[12px] text-slate-300 font-bold mt-0.5">Generá la lista para imprenta o inyectá ítems rápidos para bultos cerrados.</p>
-                                    </div>
-                                    <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto font-black text-xs">
-                                        <button onClick={printDocument} className="bg-blue-600 text-white uppercase px-5 py-3.5 rounded-xl shadow-md tracking-wider">📄 Descargar Lista Precios</button>
-                                        <button onClick={addTemporalProduct} className="bg-purple-600 text-white uppercase px-5 py-3.5 rounded-xl shadow-md tracking-wider">✨ Producto Especial (Temporal)</button>
-                                    </div>
-                                </div>
-
-                                {/* IMPORTADOR DE PRODUCTOS MAESTRO REFORZADO */}
-                                <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-400 shadow-md">
-                                    <div className="flex justify-between items-center mb-2">
-                                        <h3 className="font-black text-orange-950 text-sm uppercase tracking-wider">📦 Importación Masiva de Productos (Excel)</h3>
-                                        <button onClick={async () => { if(confirm("¿Borrar todo el inventario?")) db.collection("v2_productos").get().then(s=>s.forEach(d=>d.ref.delete())); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-red-800 hover:bg-red-700 shadow-md">🗑️ Borrar Depósito</button>
-                                    </div>
-                                    <p className="text-xs text-orange-950 font-bold mb-1">⚠️ ATENCIÓN: Para mapear ofertas automáticas, asegurate de haber seleccionado la lista de precios antes en su pestaña.</p>
-                                    <p className="text-[11px] text-orange-900 font-bold mb-2">Orden estricto de columnas Excel a copiar:</p>
-                                    <div className="bg-orange-950 p-3 rounded-xl border-2 border-slate-950 font-mono text-[11px] font-black text-yellow-400 mb-3 text-center tracking-wide shadow-inner">
-                                        Producto [TAB] Precio Base [TAB] Pack [TAB] Categoría [TAB] Imagen URL [TAB] Precio Especial [TAB] Oferta (Escribir SI o NO)
-                                    </div>
-                                    <textarea className="w-full h-24 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none focus:border-orange-500 shadow-inner bg-white text-slate-950 font-bold" placeholder="Pega filas de Excel aquí..." value={bulkData} onChange={e => setBulkData(e.target.value)} />
-                                    <button onClick={handleBulkImport} className="w-full bg-slate-950 hover:bg-black text-white py-3.5 rounded-xl mt-2 font-black uppercase text-xs tracking-widest border-b-4 border-slate-800 shadow-md">Subir En bloque de Excel Mapeado</button>
-                                </div>
-
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                    <div className="lg:col-span-1 bg-white p-6 border-2 border-slate-400 rounded-3xl shadow-md h-fit text-xs font-bold">
-                                        <h3 className="font-black text-slate-950 mb-4 uppercase text-xs text-blue-900 border-b pb-1">{editingProduct ? "📝 Editar Producto" : "➕ Agregar Producto Fijo"}</h3>
-                                        <form onSubmit={handleSaveProduct} className="space-y-3">
-                                            <div><label className="text-slate-950 block mb-1">Descripción del Artículo</label><input name="p_name" defaultValue={editingProduct?.name} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                <div><label className="text-slate-950 block mb-1">Precio Base</label><input name="p_price" defaultValue={editingProduct?.price_base} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
-                                                <div><label className="text-slate-950 block mb-1">Pack (Un.)</label><input type="number" name="p_pack" defaultValue={editingProduct?.pack || 1} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
-                                            </div>
-                                            <div><label className="text-slate-950 block mb-1">Categoría</label><input name="p_category" defaultValue={editingProduct?.category} placeholder="ALMACEN, LIMPIEZA" className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
-                                            <div><label className="text-slate-950 block mb-1">Link Imagen (Opcional)</label><input name="p_image" defaultValue={editingProduct?.imageUrl} placeholder="https://..." className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
-                                            <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white p-3.5 rounded-xl font-black uppercase mt-2 shadow-md tracking-wider">Guardar Permanente</button>
-                                        </form>
-                                    </div>
-
-                                    <div className="lg:col-span-2 bg-white border-2 border-slate-400 rounded-3xl shadow-md overflow-hidden">
-                                        <div className="p-4 bg-slate-100 border-b-2 border-slate-300 flex items-center shadow-inner"><input type="text" placeholder="Filtrar depósito central..." className="w-full p-3 rounded-xl border-2 border-slate-950 text-xs outline-none bg-white font-bold text-slate-950" onChange={e => setAdminSearch(e.target.value)} /></div>
-                                        <table className="w-full text-left border-collapse text-xs">
-                                            <thead className="bg-slate-950 text-white text-[10px] uppercase font-bold tracking-widest">
-                                                <tr><th className="p-4">Producto</th><th className="p-4">Precio Base</th><th className="p-4 text-right">Acciones</th></tr>
-                                            </thead>
-                                            <tbody className="divide-y-2 divide-slate-100 font-bold">
-                                                {sortedProducts.filter(p => (p.name || "").toLowerCase().includes(adminSearch.toLowerCase())).map(p => (
-                                                    <tr key={p.id} className="hover:bg-slate-50">
-                                                        <td className="p-4">
-                                                            <span className="font-black text-slate-950 text-base">{p.name}</span>
-                                                            <br/>
-                                                            <span className="text-[10px] text-blue-600 uppercase font-black tracking-wider">{p.category || 'VARIOS'} — Pack x{p.pack || 1}</span>
-                                                        </td>
-                                                        <td className="p-4 font-black text-slate-950 text-sm">$ ${(p.price_base || 0).toLocaleString()}</td>
-                                                        <td className="p-4 text-right space-x-3 font-black uppercase text-xs">
-                                                            <button onClick={() => { setEditingProduct(p); window.scrollTo({top:0, behavior:'smooth'}); }} className="text-slate-700 hover:text-black">Editar</button>
-                                                            <button onClick={() => { if(confirm("¿Eliminar?")) db.collection("v2_productos").doc(p.id).delete(); }} className="text-red-500 hover:text-red-700">Borrar</button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
+                                        )}
                                     </div>
                                 </div>
                             </section>
