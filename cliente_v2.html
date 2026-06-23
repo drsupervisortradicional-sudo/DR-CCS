@@ -66,7 +66,7 @@
 
                 db.collection("v2_clientes").doc(clienteId).get().then(async (docSnap) => {
                     if (!docSnap.exists) {
-                        alert("⚠️ Tu ficha de cliente no fue encontrada en el sistema.");
+                        alert("⚠️ Tu ficha de cliente no fue encontrada.");
                         setLoading(false);
                         return;
                     }
@@ -96,7 +96,6 @@
                 });
             }, []);
 
-            // MODIFICADO: Mantiene los decimales exactos sin redondear
             const obtenerPrecioNetoYPromo = (p) => {
                 const mod = matrizModificaciones[p.id] || {};
                 let precioBase = mod.precio_especial !== undefined ? mod.precio_especial : (p.price_base || 0);
@@ -115,13 +114,13 @@
                 return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
             }, [products]);
 
+            // SEPARADO: Filtra solo productos estándar para el cuerpo principal del catálogo
             const categorizedProducts = useMemo(() => {
                 const query = searchTerm.toLowerCase().trim();
+                const standards = sortedProducts.filter(p => !p.isTemp);
                 
-                const filtered = sortedProducts.filter(p => {
-                    const descMatch = (p.name || "").toLowerCase().includes(query);
-                    const catMatch = (p.category || "").toLowerCase().includes(query);
-                    return descMatch || catMatch;
+                const filtered = standards.filter(p => {
+                    return (p.name || "").toLowerCase().includes(query) || (p.category || "").toLowerCase().includes(query);
                 });
                 
                 const groups = filtered.reduce((acc, p) => {
@@ -136,6 +135,11 @@
                     return acc;
                 }, {});
             }, [sortedProducts, searchTerm]);
+
+            // NUEVO: Agrupa de forma aislada los productos especiales/temporales cargados desde el admin
+            const temporalProducts = useMemo(() => {
+                return sortedProducts.filter(p => p.isTemp);
+            }, [sortedProducts]);
 
             const selectedItems = useMemo(() => {
                 return sortedProducts.filter(p => cart[p.id] && cart[p.id] > 0);
@@ -195,62 +199,78 @@
                     </nav>
 
                     <div className="p-5 md:p-10 flex-1">
+                        {/* TAB 1: CATALOGO */}
                         {activeTab === 'catalogo' && (
                             <section>
                                 <div className="mb-6">
                                     <h1 className="text-3xl font-black text-slate-950 tracking-tight">DR DISTRIBUCIONES</h1>
                                     <p className="text-blue-600 text-xs font-black uppercase tracking-widest mt-0.5">Precios Netos para: {clienteInfo?.nombre}</p>
                                 </div>
-                                <input type="text" placeholder="Buscar por producto o por rubro (Ej: ALMACEN, LIMPIEZA)..." className="w-full p-4 bg-slate-100 text-slate-950 font-black rounded-2xl mb-6 outline-none border-2 border-slate-950 focus:border-blue-600 shadow-md text-sm placeholder-slate-500" onChange={e => setSearchTerm(e.target.value)} />
+                                <input type="text" placeholder="Buscar por producto o por rubro..." className="w-full p-4 bg-slate-100 text-slate-950 font-black rounded-2xl mb-6 outline-none border-2 border-slate-950 focus:border-blue-600 shadow-md text-sm placeholder-slate-500" onChange={e => setSearchTerm(e.target.value)} />
                                 
                                 <div className="space-y-8">
-                                    {Object.keys(categorizedProducts).length === 0 ? (
-                                        <p className="text-center text-slate-500 font-black uppercase py-10 text-xs">No se encontraron artículos o rubros</p>
-                                    ) : (
-                                        Object.keys(categorizedProducts).map(categoryName => (
-                                            <div key={categoryName} className="space-y-4">
-                                                <h2 className="text-xs font-black text-white bg-blue-600 px-5 py-3 rounded-2xl uppercase tracking-widest shadow-md flex items-center gap-2">
-                                                    <span className="w-2 h-2 bg-white rounded-full inline-block"></span>
-                                                    {categoryName}
-                                                </h2>
-                                                
-                                                {/* MODIFICADO: Ajuste de grilla a 1 columna en celular y 2 en desktop para dar más ancho a los textos */}
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                    {categorizedProducts[categoryName].map(p => {
-                                                        const { precioNeto, esOferta } = obtenerPrecioNetoYPromo(p);
-                                                        return (
-                                                            <div key={p.id} className={`border-2 rounded-3xl p-4 flex flex-col md:flex-row bg-white shadow-sm transition justify-between gap-4 relative overflow-hidden ${esOferta ? 'border-red-600 bg-red-50 shadow-red-100' : 'border-slate-300'}`}>
-                                                                {esOferta && <span className="absolute top-0 right-0 bg-red-600 text-white text-[9px] font-black uppercase px-2.5 py-1 rounded-bl-xl tracking-widest shadow-sm">🔥 Oferta</span>}
-                                                                
-                                                                {/* Columna Izquierda: Imagen y Descripción Completa sin recortes */}
-                                                                <div className="flex-1 flex gap-3 items-start">
-                                                                    <div className="w-20 h-20 bg-slate-50 border border-slate-300 rounded-2xl flex-shrink-0 flex items-center justify-center overflow-hidden">
-                                                                        {p.imageUrl ? (
-                                                                            <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-1" />
-                                                                        ) : (
-                                                                            <span className="text-slate-300 text-xl">📦</span>
-                                                                        )}
-                                                                    </div>
-                                                                    <div>
-                                                                        {/* MODIFICADO: Se eliminó line-clamp para que muestre la descripción completa y los gramos */}
-                                                                        <h3 className="font-black text-slate-950 text-sm leading-snug mb-1">{p.name}</h3>
-                                                                        <p className="text-[13px] text-blue-700 font-black uppercase">$ {precioNeto.toFixed(2)} un. | Pack x{p.pack || 1}</p>
-                                                                    </div>
+                                    {Object.keys(categorizedProducts).map(categoryName => (
+                                        <div key={categoryName} className="space-y-4">
+                                            <h2 className="text-xs font-black text-white bg-blue-600 px-5 py-3 rounded-2xl uppercase tracking-widest shadow-md flex items-center gap-2">
+                                                <span className="w-2 h-2 bg-white rounded-full inline-block"></span>
+                                                {categoryName}
+                                            </h2>
+                                            
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                {categorizedProducts[categoryName].map(p => {
+                                                    const { precioNeto, esOferta } = obtenerPrecioNetoYPromo(p);
+                                                    return (
+                                                        <div key={p.id} className={`border-2 rounded-3xl p-4 flex flex-col md:flex-row bg-white shadow-sm transition justify-between gap-4 relative overflow-hidden ${esOferta ? 'border-red-600 bg-red-50 shadow-red-100' : 'border-slate-300'}`}>
+                                                            {esOferta && <span className="absolute top-0 right-0 bg-red-600 text-white text-[9px] font-black uppercase px-2.5 py-1 rounded-bl-xl tracking-widest shadow-sm">🔥 Oferta</span>}
+                                                            <div className="flex-1 flex gap-3 items-start">
+                                                                <div className="w-20 h-20 bg-slate-50 border border-slate-300 rounded-2xl flex-shrink-0 flex items-center justify-center overflow-hidden">
+                                                                    {p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-1" /> : <span className="text-slate-300 text-xl">📦</span>}
                                                                 </div>
-
-                                                                {/* Columna Derecha: Input de carga y Subtotal con decimales fijos */}
-                                                                <div className="space-y-2 flex flex-col justify-end min-w-[120px]">
-                                                                    <input type="number" min="0" placeholder="0 bultos" className="w-full p-2 border-2 border-slate-950 bg-white text-slate-950 font-black text-center rounded-xl outline-none focus:border-blue-600 shadow-sm text-sm" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
-                                                                    <div className="text-center font-black text-slate-950 text-sm truncate">
-                                                                        Subt: $ {((cart[p.id] || 0) * precioNeto * (p.pack || 1)).toFixed(2)}
-                                                                    </div>
+                                                                <div>
+                                                                    <h3 className="font-black text-slate-950 text-sm leading-snug mb-1">{p.name}</h3>
+                                                                    <p className="text-[13px] text-blue-700 font-black uppercase">$ {precioNeto.toFixed(2)} un. | Pack x{p.pack || 1}</p>
                                                                 </div>
                                                             </div>
-                                                        );
-                                                    })}
-                                                </div>
+                                                            <div className="space-y-2 flex flex-col justify-end min-w-[120px]">
+                                                                <input type="number" min="0" placeholder="0 bultos" className="w-full p-2 border-2 border-slate-950 bg-white text-slate-950 font-black text-center rounded-xl outline-none focus:border-blue-600 shadow-sm text-sm" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                                                <div className="text-center font-black text-slate-950 text-sm truncate">Subt: $ {((cart[p.id] || 0) * precioNeto * (p.pack || 1)).toFixed(2)}</div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
-                                        ))
+                                        </div>
+                                    ))}
+
+                                    {/* SECCIÓN AUTOMÁTICA DE PRODUCTOS TEMPORALES / EXCEPCIONES */}
+                                    {temporalProducts.length > 0 && (
+                                        <div className="space-y-4 pt-4 border-t-4 border-dashed border-slate-300">
+                                            <h2 className="text-xs font-black text-white bg-purple-600 px-5 py-3 rounded-2xl uppercase tracking-widest shadow-md flex items-center gap-2 animate-pulse">
+                                                <span>✨</span> ARTÍCULOS ESPECIALES SOLICITADOS (TEMPORAL)
+                                            </h2>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                {temporalProducts.map(p => {
+                                                    const { precioNeto } = obtenerPrecioNetoYPromo(p);
+                                                    return (
+                                                        <div key={p.id} className="border-2 border-purple-400 rounded-3xl p-4 flex flex-col md:flex-row bg-purple-50/30 shadow-sm justify-between gap-4 relative overflow-hidden">
+                                                            <div className="flex-1 flex gap-3 items-start">
+                                                                <div className="w-20 h-20 bg-white border border-purple-300 rounded-2xl flex-shrink-0 flex items-center justify-center">
+                                                                    <span className="text-purple-400 text-xl">⭐</span>
+                                                                </div>
+                                                                <div>
+                                                                    <h3 className="font-black text-purple-950 text-sm leading-snug mb-1">{p.name}</h3>
+                                                                    <p className="text-[13px] text-purple-700 font-black uppercase">$ {precioNeto.toFixed(2)} un. | Pack x{p.pack || 1}</p>
+                                                                </div>
+                                                            </div>
+                                                            <div className="space-y-2 flex flex-col justify-end min-w-[120px]">
+                                                                <input type="number" min="0" placeholder="0 bultos" className="w-full p-2 border-2 border-purple-950 bg-white text-slate-950 font-black text-center rounded-xl outline-none focus:border-purple-600 shadow-sm text-sm" value={cart[p.id] || ""} onChange={e => setCart({...cart, [p.id]: parseInt(e.target.value) || 0})} />
+                                                                <div className="text-center font-black text-purple-950 text-sm truncate">Subt: $ {((cart[p.id] || 0) * precioNeto * (p.pack || 1)).toFixed(2)}</div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             </section>
