@@ -47,7 +47,7 @@
             const [clienteSearch, setClienteSearch] = useState("");
             const [listaSearch, setListaSearch] = useState("");
 
-            // Carga de datos en tiempo real
+            // Carga de datos en tiempo real V3
             useEffect(() => {
                 const unsubClientes = db.collection("v3_clientes").onSnapshot(s => 
                     setClientes(s.docs.map(d => ({id: d.id, ...d.data()})))
@@ -77,7 +77,7 @@
                 }).filter(c => c.tocaEnvio || c.tocaVisita);
             }, [clientes]);
 
-            // MEJORADO: Buscador inteligente para la Cartera de Clientes (Filtra por nombre, dirección o lista)
+            // Buscador inteligente para la Cartera de Clientes
             const clientesFiltrados = useMemo(() => {
                 const query = clienteSearch.toLowerCase().trim();
                 return clientes.filter(c => {
@@ -116,7 +116,7 @@
                 f.reset();
             };
 
-            // Importación Masiva de Clientes vinculados a sus Listas por Nombre
+            // MODIFICADO: Importación Masiva de Clientes aceptando Descuento en la 5ta Columna
             const handleBulkClientesImport = async () => {
                 const rows = bulkClientesData.trim().split("\n");
                 const batch = db.batch();
@@ -127,13 +127,14 @@
                         const id = "cli_" + (Date.now() + Math.random()).toString().replace(".","");
                         const nombreListaExcel = cols[3] ? cols[3].trim().toUpperCase() : "";
                         const listaEncontrada = listas.find(l => l.nombre_lista.toUpperCase() === nombreListaExcel);
+                        const descExtra = cols[4] ? parseFloat(cols[4].replace("%", "").trim()) || 0 : 0;
                         
                         batch.set(db.collection("v3_clientes").doc(id), {
                             nombre: cols[0].trim(),
                             telefono: cols[1].trim().replace("+", ""),
                             direccion: cols[2] ? cols[2].trim() : "",
                             lista_id: listaEncontrada ? listaEncontrada.id : "", 
-                            descuento_extra: 0,
+                            descuento_extra: descExtra,
                             frecuencia_envio: 7, 
                             frecuencia_visita: 14, 
                             ultimo_envio: "",
@@ -143,7 +144,7 @@
                 });
                 await batch.commit();
                 setBulkClientesData("");
-                alert("Cartera de clientes importada y vinculada.");
+                alert("Cartera de clientes importada con sus descuentos vinculados de forma exitosa.");
             };
 
             // Creación de una nueva Lista Comercial
@@ -157,7 +158,7 @@
                 });
             };
 
-            // NUEVO: Importación masiva de Productos DIRECTO adentro de la Lista seleccionada
+            // Importación masiva de Productos DIRECTO adentro de la Lista seleccionada
             const handleBulkProductosListaImport = async () => {
                 if(!activeListaId) {
                     alert("⚠️ Por favor, seleccioná primero una Lista de la izquierda para poder inyectarle el Excel.");
@@ -184,15 +185,34 @@
                     }
                 });
 
-                await db.collection("v3_listas").doc(activeListaId).update({
-                    productos: productosActuales
-                });
-
+                await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
                 setBulkData("");
                 alert(`¡Éxito! Se cargaron los productos y precios específicos dentro de la lista.`);
             };
 
-            // NUEVO: Agregar Producto Especial (Temporal) directo a la lista activa
+            // NUEVO: Función para editar en caliente las propiedades de un producto dentro de su lista
+            const handleEditProductoInLista = async (p) => {
+                const nuevoPrecioInput = prompt(`Editar precio para "${p.name}":`, p.price);
+                if (nuevoPrecioInput === null) return;
+                const nuevoPrecio = parseMoney(nuevoPrecioInput);
+
+                const nuevoPack = parseInt(prompt("Unidades por bulto (Pack):", p.pack)) || 1;
+                const esOfertaInput = prompt("¿Está en Oferta? (Escribir SI o NO):", p.es_oferta ? "SI" : "NO");
+                const nuevaOferta = esOfertaInput ? esOfertaInput.trim().toUpperCase() === "SI" : false;
+
+                const listaActual = listas.find(l => l.id === activeListaId);
+                const productosActualizados = listaActual.productos.map(item => {
+                    if (item.id === p.id) {
+                        return { ...item, price: nuevoPrecio, pack: nuevoPack, es_oferta: nuevaOferta };
+                    }
+                    return item;
+                });
+
+                await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActualizados });
+                alert("Producto actualizado correctamente.");
+            };
+
+            // Agregar Producto Especial (Temporal) directo a la lista activa
             const addTemporalProductToList = () => {
                 if(!activeListaId) return alert("Seleccioná primero una lista.");
                 const name = prompt("Descripción del producto especial:");
@@ -239,7 +259,7 @@
                                     <tr>
                                         <td style="padding:10px; border-bottom:1px solid #ddd; text-align:left;">${p.name} ${p.es_oferta ? '<span style="color:red;font-weight:bold;">[OFERTA]</span>':''}</td>
                                         <td style="padding:10px; text-align:center; border-bottom:1px solid #ddd; color:#000;">x${p.pack || 1}</td>
-                                        <td style="padding:10px; text-align:right; border-bottom:1px solid #ddd; font-weight:bold; color:#000;">$ ${(p.price || 0).toLocaleString()}</td>
+                                        <td style="padding:10px; text-align:right; border-bottom:1px solid #ddd; font-weight:bold; color:#000;">$ ${(p.price || 0).toFixed(2)}</td>
                                     </tr>
                                 `).join('')}
                             `).join('')}
@@ -321,14 +341,14 @@
                             <section className="space-y-6">
                                 <div className="bg-blue-50 p-6 rounded-3xl border-2 border-blue-400 shadow-md">
                                     <div className="flex justify-between items-center mb-2">
-                                        <h3 className="font-black text-blue-950 text-sm uppercase tracking-wider">📋 Importación Masiva de Clientes (Excel)</h3>
+                                        <h3 className="font-black text-blue-950 text-sm uppercase tracking-wider">📋 Importación Masiva de Clientes con Descuento (Excel)</h3>
                                         <button onClick={async () => { if(confirm("¿Vaciar clientes?")) db.collection("v3_clientes").get().then(s=>s.forEach(d=>d.ref.delete())); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-red-800">🗑️ Vaciar Cartera</button>
                                     </div>
                                     <div className="bg-blue-950 p-3 rounded-xl border-2 border-slate-950 font-mono text-[11px] font-black text-cyan-400 mb-3 text-center tracking-wide shadow-inner">
-                                        Nombre Cliente [TAB] WhatsApp (Con 549...) [TAB] Dirección [TAB] Nombre exacto de la Lista (Ej: MAYORISTA)
+                                        Nombre Cliente [TAB] WhatsApp [TAB] Dirección [TAB] Nombre exacto de la Lista [TAB] Descuento % (Ej: 5.5 o dejar vacío)
                                     </div>
                                     <textarea className="w-full h-24 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pega clientes desde Excel..." value={bulkClientesData} onChange={e => setBulkClientesData(e.target.value)} />
-                                    <button onClick={handleBulkClientesImport} className="w-full bg-slate-950 text-white py-3.5 rounded-xl mt-2 font-black uppercase text-xs tracking-widest shadow-md">Subir Cartera de Clientes Vinculada</button>
+                                    <button onClick={handleBulkClientesImport} className="w-full bg-slate-950 text-white py-3.5 rounded-xl mt-2 font-black uppercase text-xs tracking-widest shadow-md">Subir Cartera de Clientes con Descuentos</button>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -345,7 +365,7 @@
                                                     {listas.map(l => <option key={l.id} value={l.id}>{l.nombre_lista}</option>)}
                                                 </select>
                                             </div>
-                                            <div><label className="text-slate-950 block mb-1">Descuento Extra Ficha (%)</label><input type="number" step="0.1" name="c_desc" defaultValue={editingCliente?.descuento_extra} placeholder="0" className="w-full p-3 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-600 text-sm" /></div>
+                                            <div><label className="text-slate-950 block mb-1">Descuento Extra Ficha (%)</label><input type="number" step="0.01" name="c_desc" defaultValue={editingCliente?.descuento_extra} placeholder="0" className="w-full p-3 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-600 text-sm" /></div>
                                             <div className="grid grid-cols-2 gap-2">
                                                 <div><label className="text-slate-950 block mb-1">Catálogo (Días)</label><input type="number" name="c_frec_envio" defaultValue={editingCliente?.frecuencia_envio || 7} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
                                                 <div><label className="text-slate-950 block mb-1">Visita (Días)</label><input type="number" name="c_frec_visita" defaultValue={editingCliente?.frecuencia_visita || 14} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
@@ -355,7 +375,6 @@
                                     </div>
 
                                     <div className="lg:col-span-2 bg-white border-2 border-slate-400 rounded-3xl shadow-md overflow-hidden">
-                                        {/* NUEVO: Buscador inteligente para la Cartera de Clientes */}
                                         <div className="p-4 bg-slate-100 border-b-2 border-slate-300 shadow-inner flex items-center">
                                             <input type="text" placeholder="🔍 Buscar clientes por nombre, dirección o lista asignada..." className="w-full p-3 border-2 border-slate-950 rounded-xl text-xs font-bold text-slate-950 outline-none" value={clienteSearch} onChange={e => setClienteSearch(e.target.value)} />
                                         </div>
@@ -389,7 +408,7 @@
                             </section>
                         )}
 
-                        {/* TAB 3: GESTION DE LISTAS INDEPENDIENTES */}
+                        {/* TAB 3: GESTION DE LISTAS */}
                         {activeTab === 'listas' && (
                             <section className="space-y-6">
                                 <div className="flex justify-between items-center bg-white p-4 border-2 border-slate-400 rounded-2xl shadow-md">
@@ -401,7 +420,6 @@
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    {/* Selector lateral de listas */}
                                     <div className="md:col-span-1 bg-white border-2 border-slate-400 rounded-2xl p-4 space-y-2 shadow-md">
                                         <h4 className="text-[10px] uppercase font-black text-slate-400 tracking-wider">Seleccionar Lista:</h4>
                                         {listas.map(l => (
@@ -409,11 +427,9 @@
                                         ))}
                                     </div>
 
-                                    {/* Contenedor e importador de la lista seleccionada */}
                                     <div className="md:col-span-3 space-y-4">
                                         {activeListaId ? (
                                             <>
-                                                {/* IMPORTADOR DE EXCEL MOVIDO ADENTRO DE CADA LISTA */}
                                                 <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-400 shadow-md">
                                                     <div className="flex justify-between items-center mb-2">
                                                         <h3 className="font-black text-orange-950 text-sm uppercase tracking-wider">📥 Inyectar Excel de Productos a: <span className="text-blue-700">{listas.find(l=>l.id===activeListaId)?.nombre_lista}</span></h3>
@@ -430,7 +446,6 @@
                                                     </div>
                                                 </div>
 
-                                                {/* Tabla de revisión de ítems de esta lista */}
                                                 <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-md overflow-hidden">
                                                     <div className="p-3 bg-slate-100 border-b flex items-center">
                                                         <input type="text" placeholder="Filtrar productos de esta lista..." className="w-full p-2.5 rounded-xl border-2 border-slate-950 bg-white font-bold text-xs" onChange={e => setListaSearch(e.target.value)} />
@@ -453,7 +468,9 @@
                                                                             $ {(p.price || 0).toFixed(2)}
                                                                             {p.es_oferta && <span className="bg-red-100 text-red-600 px-2 py-0.5 text-[9px] rounded-md font-black ml-2 uppercase">🔥 Oferta</span>}
                                                                         </td>
-                                                                        <td className="p-4 text-right">
+                                                                        <td className="p-4 text-right space-x-3">
+                                                                            {/* MODIFICADO: Agregado botón para editar propiedades en caliente */}
+                                                                            <button onClick={() => handleEditProductoInLista(p)} className="text-blue-600 font-bold uppercase text-[11px]">Editar</button>
                                                                             <button onClick={async () => {
                                                                                 if(confirm("¿Eliminar de la lista?")) {
                                                                                     const nuevaListaProds = listas.find(l=>l.id===activeListaId).productos.filter(item => item.id !== p.id);
@@ -482,7 +499,7 @@
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(--App /--);
     </script>
 </body>
 </html>
