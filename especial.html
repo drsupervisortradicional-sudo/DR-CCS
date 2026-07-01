@@ -120,6 +120,7 @@
                 }));
 
                 try {
+                    // 1. Guarda en Firebase para llevar el registro en la base de datos
                     await db.collection("solicitudes").add({
                         cliente: nombre,
                         direccion: direccion,
@@ -129,12 +130,34 @@
                         estado: "pendiente"
                     });
                     
-                    alert("¡Solicitud enviada con éxito! Nos comunicaremos con vos a la brevedad con tu presupuesto diferencial.");
+                    // 2. MODIFICADO: Generar texto automático detallado para WhatsApp
+                    let mensajeWA = `🏛️ *Nueva Solicitud de Cotización (DR-CCS)*\n\n`;
+                    mensajeWA += `👤 *Cliente:* ${nombre}\n`;
+                    if (direccion.trim()) mensajeWA += `📍 *Dirección:* ${direccion}\n`;
+                    if (notas.trim()) mensajeWA += `📝 *Notas:* ${notas}\n`;
+                    mensajeWA += `\n📦 *Detalle del Pedido:*\n`;
+                    
+                    itemsSolicitud.forEach((item, index) => {
+                        const totalUnidades = item.cantidad * item.pack;
+                        mensajeWA += `${index + 1}. ${item.name} -> *${item.cantidad} bultos* (${totalUnidades.toLocaleString()} un.)\n`;
+                    });
+
+                    // 3. Configura tu número (Reemplazá TU_NUMERO_DE_TELEFONO por tu celular, ej: 5493412345678 sin el +)
+                    const nroTelefono = "5493416384086"; 
+                    const urlWhatsApp = `https://api.whatsapp.com/send?phone=${nroTelefono}&text=${encodeURIComponent(mensajeWA)}`;
+                    
+                    alert("¡Solicitud registrada con éxito! A continuación se abrirá WhatsApp para enviarnos el aviso.");
+                    
+                    // Limpieza de estados
                     setCart({});
                     setNombre("");
                     setDireccion("");
                     setNotas("");
                     setActiveTab('catalogo');
+
+                    // Abre la ventana de WhatsApp de forma nativa
+                    window.open(urlWhatsApp, '_blank');
+
                 } catch (error) {
                     console.error("Error al enviar solicitud: ", error);
                     alert("Hubo un problema al enviar la solicitud. Por favor, reintentá.");
@@ -166,7 +189,7 @@
                             <section>
                                 <div className="mb-8">
                                     <h1 className="text-4xl font-extrabold text-slate-900">DR - Especial</h1>
-                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Catálogo Mayorista de Alta Demanda</p>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Catálogo Mayorista</p>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 
@@ -181,7 +204,6 @@
                                                     {categoryName}
                                                 </h2>
                                                 
-                                                {/* MODIFICADO: Ajustado a 1 columna en móvil para expandir la visual del texto */}
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                                                     {categorizedProducts[categoryName].map(p => (
                                                         <div key={p.id} className="border-2 border-slate-100 rounded-3xl p-4 flex flex-col bg-white shadow-sm hover:border-blue-200 transition justify-between">
@@ -193,7 +215,6 @@
                                                                         <span className="text-slate-300 text-2xl">🖼️</span>
                                                                     )}
                                                                 </div>
-                                                                {/* MODIFICADO: Se quitó la clase 'line-clamp-2' para mostrar gramos, marcas y nombres completos */}
                                                                 <h3 className="font-bold text-slate-800 text-sm leading-snug mb-1">{p.name}</h3>
                                                                 <p className="text-[13px] text-blue-600 font-bold uppercase mb-3">Precio por Volumen a Cotizar | Pack x{p.pack || 1}</p>
                                                             </div>
