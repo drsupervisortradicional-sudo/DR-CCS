@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VentasIQ Master | Panel de Control CRM</title>
+    <!-- Firebase Legacy Scripts -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React y Babel estables UMD -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -44,6 +47,7 @@
             const [activeListaId, setActiveListaId] = useState("");
             const [bulkData, setBulkData] = useState("");
             const [bulkClientesData, setBulkClientesData] = useState("");
+            const [crmSearch, setCrmSearch] = useState(""); // NUEVO: Buscador de CRM
             const [clienteSearch, setClienteSearch] = useState("");
             const [listaSearch, setListaSearch] = useState("");
 
@@ -58,10 +62,12 @@
                 return () => { unsubClientes(); unsubListas(); };
             }, []);
 
-            // CRM: Alertas de Agenda Comercial
-            const agendaHoy = useMemo(() => {
+            // CRM: Alertas de Agenda Comercial (MODIFICADO: Incluye buscador inteligente)
+            const agendaHoyFiltrada = useMemo(() => {
                 const hoy = new Date();
-                return clientes.map(c => {
+                const query = crmSearch.toLowerCase().trim();
+
+                const alertasBase = clientes.map(c => {
                     const ultEnvio = c.ultimo_envio ? new Date(c.ultimo_envio) : null;
                     const ultVisita = c.ultimo_visita ? new Date(c.ultimo_visita) : null;
                     const diasDesdeEnvio = ultEnvio ? Math.floor((hoy - ultEnvio) / (1000 * 60 * 60 * 24)) : 999;
@@ -75,7 +81,16 @@
                         diasDesdeVisita
                     };
                 }).filter(c => c.tocaEnvio || c.tocaVisita);
-            }, [clientes]);
+
+                // Aplica filtro por nombre, dirección o nombre de lista
+                return alertasBase.filter(c => {
+                    const nombreMatch = (c.nombre || "").toLowerCase().includes(query);
+                    const direccMatch = (c.direccion || "").toLowerCase().includes(query);
+                    const nombreLista = listas.find(l => l.id === c.lista_id)?.nombre_lista || "Base General";
+                    const listaMatch = nombreLista.toLowerCase().includes(query);
+                    return nombreMatch || direccMatch || listaMatch;
+                });
+            }, [clientes, crmSearch, listas]);
 
             // Buscador inteligente para la Cartera de Clientes
             const clientesFiltrados = useMemo(() => {
@@ -92,8 +107,7 @@
             const parseMoney = (val) => {
                 if (val === undefined || val === null) return 0;
                 let clean = val.toString().replace("$", "").replace(/\./g, "").replace(",", ".");
-                let parsed = parseFloat(clean);
-                return isNaN(parsed) ? 0 : parsed;
+                return parseFloat(clean) || 0;
             };
 
             // CRUD Clientes Individual
@@ -158,10 +172,10 @@
                 });
             };
 
-            // Importación masiva de Productos DIRECTO adentro de la Lista seleccionada
+            // Importación masiva de Productos DIRECTO
             const handleBulkProductosListaImport = async () => {
                 if(!activeListaId) {
-                    alert("⚠️ Por favor, seleccioná primero una Lista de la izquierda para poder inyectarle el Excel.");
+                    alert("⚠️ Por favor, seleccioná primero una Lista de la izquierda.");
                     return;
                 }
 
@@ -187,29 +201,46 @@
 
                 await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
                 setBulkData("");
-                alert(`¡Éxito! Se cargaron los productos y precios específicos dentro de la lista.`);
+                alert(`¡Éxito! Se cargaron los productos y precios específicos.`);
             };
 
-            // Editar propiedades de un producto dentro de su lista
+            // MODIFICADO: Edición TOTAL de todos los campos de un producto en caliente
             const handleEditProductoInLista = async (p) => {
-                const nuevoPrecioInput = prompt(`Editar precio para "${p.name}":`, p.price);
+                const nuevoNombre = prompt("Editar descripción / marca del artículo:", p.name);
+                if (nuevoNombre === null) return; // Cancela el flujo si toca cancelar
+
+                const nuevoPrecioInput = prompt("Editar precio específico de lista:", p.price);
                 if (nuevoPrecioInput === null) return;
                 const nuevoPrecio = parseMoney(nuevoPrecioInput);
 
                 const nuevoPack = parseInt(prompt("Unidades por bulto (Pack):", p.pack)) || 1;
+                
+                const nuevaCategoriaInput = prompt("Editar Rubro / Categoría:", p.category || "VARIOS");
+                const nuevaCategoria = nuevaCategoriaInput ? nuevaCategoriaInput.trim().toUpperCase() : "VARIOS";
+
+                const nuevaImagen = prompt("Editar URL de la imagen (Dejar vacío si no tiene):", p.imageUrl || "");
+
                 const esOfertaInput = prompt("¿Está en Oferta? (Escribir SI o NO):", p.es_oferta ? "SI" : "NO");
                 const nuevaOferta = esOfertaInput ? esOfertaInput.trim().toUpperCase() === "SI" : false;
 
                 const listaActual = listas.find(l => l.id === activeListaId);
                 const productosActualizados = listaActual.productos.map(item => {
                     if (item.id === p.id) {
-                        return { ...item, price: nuevoPrecio, pack: nuevoPack, es_oferta: nuevaOferta };
+                        return { 
+                            ...item, 
+                            name: nuevoNombre.trim(),
+                            price: nuevoPrecio, 
+                            pack: nuevoPack, 
+                            category: nuevaCategoria,
+                            imageUrl: nuevaImagen.trim(),
+                            es_oferta: nuevaOferta 
+                        };
                     }
                     return item;
                 });
 
                 await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActualizados });
-                alert("Producto actualizado correctamente.");
+                alert("Producto modificado en todos sus campos de forma exitosa.");
             };
 
             // Agregar Producto Especial (Temporal)
@@ -298,27 +329,33 @@
                     </header>
 
                     <nav className="bg-white border-b-4 border-slate-300 flex p-2 sticky top-0 z-40 shadow-md text-xs font-black uppercase tracking-wider">
-                        <button onClick={() => setActiveTab('crm')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'crm' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📊 CRM & Agenda ({agendaHoy.length})</button>
+                        <button onClick={() => setActiveTab('crm')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'crm' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📊 CRM & Agenda ({agendaHoyFiltrada.length})</button>
                         <button onClick={() => setActiveTab('clientes')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'clientes' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>👥 Cartera Clientes ({clientes.length})</button>
                         <button onClick={() => setActiveTab('listas')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'listas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📋 Gestión de Listas de Precios</button>
                     </nav>
 
                     <main className="p-4 md:p-8 max-w-6xl mx-auto w-full flex-1">
                         
-                        {/* TAB 1: CRM */}
+                        {/* TAB 1: CRM & AGENDA (MODIFICADO: Incluye buscador de Hoja de Ruta) */}
                         {activeTab === 'crm' && (
                             <section className="space-y-6">
-                                <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-lg p-6">
+                                <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-lg p-6 overflow-hidden">
                                     <h3 className="font-black text-slate-950 mb-4 uppercase text-xs tracking-widest text-blue-900 border-b pb-2">Hojas de Ruta y Envíos Pendientes</h3>
-                                    {agendaHoy.length === 0 ? (
-                                        <p className="text-center py-10 text-base text-slate-500 font-black uppercase">🎉 Agenda comercial al día.</p>
+                                    
+                                    {/* NUEVO: Buscador inteligente para el CRM */}
+                                    <div className="mb-4 bg-slate-100 p-3 rounded-2xl border flex items-center">
+                                        <input type="text" placeholder="🔍 Filtrar agenda del día por nombre de comercio, dirección o lista de precios..." className="w-full p-3 border-2 border-slate-950 rounded-xl text-xs font-bold text-slate-950 outline-none" value={crmSearch} onChange={e => setCrmSearch(e.target.value)} />
+                                    </div>
+
+                                    {agendaHoyFiltrada.length === 0 ? (
+                                        <p className="text-center py-10 text-base text-slate-500 font-black uppercase">🎉 Ninguna alerta coincide con el criterio.</p>
                                     ) : (
                                         <div className="divide-y-2 divide-slate-200">
-                                            {agendaHoy.map(c => (
+                                            {agendaHoyFiltrada.map(c => (
                                                 <div key={c.id} className="py-4 flex flex-col md:flex-row justify-between md:items-center gap-4">
                                                     <div>
                                                         <h4 className="font-black text-slate-950 text-base">{c.nombre}</h4>
-                                                        <p className="text-xs text-slate-800 font-bold">📍 {c.direccion || 'Sin dirección'} | 📋 {listas.find(l=>l.id===c.lista_id)?.nombre_lista || "Base"}</p>
+                                                        <p className="text-xs text-slate-800 font-bold">📍 {c.direccion || 'Sin dirección'} | 📋 {listas.find(l=>l.id===c.lista_id)?.nombre_lista || "Base General"}</p>
                                                         <div className="flex gap-2 mt-2">
                                                             {c.tocaEnvio && <span className="bg-green-200 text-green-950 font-black text-[10px] px-2.5 py-1 rounded-md border border-green-400 uppercase">📋 Catálogo Pendiente</span>}
                                                             {c.tocaVisita && <span className="bg-purple-200 text-purple-950 font-black text-[10px] px-2.5 py-1 rounded-md border border-purple-400 uppercase">🚗 Visita Requerida</span>}
@@ -469,6 +506,7 @@
                                                                             {p.es_oferta && <span className="bg-red-100 text-red-600 px-2 py-0.5 text-[9px] rounded-md font-black ml-2 uppercase">🔥 Oferta</span>}
                                                                         </td>
                                                                         <td className="p-4 text-right space-x-3">
+                                                                            {/* MODIFICADO: Ahora edita de forma nativa todos los campos del producto */}
                                                                             <button onClick={() => handleEditProductoInLista(p)} className="text-blue-600 font-bold uppercase text-[11px]">Editar</button>
                                                                             <button onClick={async () => {
                                                                                 if(confirm("¿Eliminar de la lista?")) {
