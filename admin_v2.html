@@ -14,7 +14,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700;800;900&display=swap');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; color: #0f172a; }
         @media print { #root { display: none !important; } }
     </style>
@@ -60,8 +60,10 @@
             const [selectedSolicitud, setSelectedSolicitud] = useState(null);
             const [descuentosCotizacion, setDescuentosCotizacion] = useState({});
 
-            // Cuentas Corrientes y Comisiones
+            // Cuentas Corrientes y Comisiones (Buscador inteligente de cliente)
             const [selectedClienteCuenta, setSelectedClienteCuenta] = useState("");
+            const [searchClienteCuentaQuery, setSearchClienteCuentaQuery] = useState("");
+            const [showClienteCuentaResults, setShowClienteCuentaResults] = useState(false);
             const [mesComision, setMesComision] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
             const [pctComision, setPctComision] = useState(5);
 
@@ -127,6 +129,16 @@
                     return nombreMatch || direccMatch || listaMatch;
                 });
             }, [clientes, clienteSearch, listas]);
+
+            // BUSCADOR INTELIGENTE PARA CUENTAS CORRIENTES
+            const clientesCuentaFiltrados = useMemo(() => {
+                const q = searchClienteCuentaQuery.toLowerCase().trim();
+                if (!q) return [];
+                return clientes.filter(c => 
+                    (c.nombre || "").toLowerCase().includes(q) || 
+                    (c.direccion || "").toLowerCase().includes(q)
+                ).slice(0, 8);
+            }, [clientes, searchClienteCuentaQuery]);
 
             // CRUD Cliente Individual
             const handleSaveCliente = async (e) => {
@@ -250,7 +262,7 @@
                 alert("Producto modificado.");
             };
 
-            // REPARADO: Botón de Producto Especial
+            // Botón de Producto Especial
             const addTemporalProductToList = async () => {
                 if(!activeListaId) return alert("Por favor, seleccioná primero una lista del panel izquierdo.");
                 
@@ -329,6 +341,14 @@
                 window.open(`https://wa.me/${cliente.telefono}?text=${encodeURIComponent(msg)}`);
             };
 
+            // NUEVO: Enviar Presupuestador Especial abriendo el buscador libre de contactos de WhatsApp
+            const compartirPresupuestadorWA = () => {
+                const linkEspecial = `${window.location.origin}${window.location.pathname.replace('admin_v2.html', 'especial.html')}`;
+                const msg = `Hola! Te dejamos nuestro *Catálogo y Presupuestador de Pedidos Especiales*. Podés armar tu lista de bultos y enviarnos tu solicitud de cotización ingresando acá:\n\n${linkEspecial}`;
+                // Al no poner "phone=", abre la lista libre de contactos en WhatsApp
+                window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+            };
+
             // COTIZACIONES ESPECIALES
             const totalSolicitudCotizada = useMemo(() => {
                 if (!selectedSolicitud) return 0;
@@ -376,7 +396,7 @@
 
                 await db.collection("v3_movimientos").add({
                     cliente_id: selectedClienteCuenta,
-                    tipo: f.m_tipo.value, // FACTURA o COBRO
+                    tipo: f.m_tipo.value,
                     nro_factura: f.m_factura.value.trim(),
                     fecha: f.m_fecha.value,
                     monto: parseMoney(f.m_monto.value),
@@ -404,7 +424,6 @@
                 }, 0);
             }, [movimientosClienteActual]);
 
-            // Cálculo de Comisiones por Cobros Efectivos del Mes
             const cobrosDelMes = useMemo(() => {
                 return movimientos.filter(m => m.tipo === 'COBRO' && m.fecha && m.fecha.startsWith(mesComision));
             }, [movimientos, mesComision]);
@@ -436,13 +455,12 @@
 
                     <main className="p-4 md:p-8 max-w-6xl mx-auto w-full flex-1">
                         
-                        {/* TAB 1: CRM & AGENDA (MODIFICADO: Buscador + Filtro por Lista de Precios) */}
+                        {/* TAB 1: CRM & AGENDA */}
                         {activeTab === 'crm' && (
                             <section className="space-y-6">
                                 <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-lg p-6">
                                     <h3 className="font-black text-slate-950 mb-4 uppercase text-xs tracking-widest text-blue-900 border-b pb-2">Hojas de Ruta y Envíos Pendientes</h3>
                                     
-                                    {/* BUSCADOR COMBINADO CRM */}
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6 bg-slate-100 p-4 rounded-2xl border-2 border-slate-300">
                                         <div className="sm:col-span-2">
                                             <label className="text-[10px] font-black uppercase text-slate-600 mb-1 block">🔍 Buscar Cliente o Dirección</label>
@@ -588,7 +606,6 @@
                                                     <textarea className="w-full h-20 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pegá acá las celdas de tu Excel..." value={bulkData} onChange={e => setBulkData(e.target.value)} />
                                                     <div className="flex flex-wrap gap-2 mt-2 font-black text-xs">
                                                         <button onClick={handleBulkProductosListaImport} className="flex-1 bg-slate-950 text-white py-3 rounded-xl shadow-md uppercase tracking-wider min-w-[200px]">Subir Excel a esta Lista</button>
-                                                        {/* REPARADO: Botón de Producto Especial */}
                                                         <button onClick={addTemporalProductToList} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-3 rounded-xl uppercase shadow-md transition flex items-center gap-1">✨ Producto Especial</button>
                                                         <button onClick={printDocumentLista} className="bg-blue-600 text-white px-5 py-3 rounded-xl uppercase shadow-md">📄 Imprimir PDF</button>
                                                     </div>
@@ -641,11 +658,20 @@
                             </section>
                         )}
 
-                        {/* TAB 4: COTIZACIONES ESPECIALES (NUEVO: Integrado de especial.html) */}
+                        {/* TAB 4: COTIZACIONES ESPECIALES (NUEVO: Botón para enviar Presupuestador a contacto de WhatsApp) */}
                         {activeTab === 'cotizaciones' && (
                             <section className="space-y-6">
                                 <div className="bg-white border-2 border-slate-400 rounded-3xl p-6 shadow-md">
-                                    <h3 className="font-black text-slate-950 text-sm uppercase tracking-wider mb-4 border-b pb-2 text-blue-900">📥 Solicitudes Entrantes de Cotización</h3>
+                                    <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-4 border-b pb-3">
+                                        <h3 className="font-black text-slate-950 text-sm uppercase tracking-wider text-blue-900">📥 Solicitudes Entrantes de Cotización</h3>
+                                        {/* NUEVO: Botón WhatsApp abre buscador libre de contactos */}
+                                        <button 
+                                            onClick={compartirPresupuestadorWA} 
+                                            className="bg-green-600 hover:bg-green-700 text-white font-black px-5 py-3 rounded-2xl text-xs uppercase shadow-md transition flex items-center justify-center gap-2"
+                                        >
+                                            📲 Compartir Presupuestador Especial por WhatsApp
+                                        </button>
+                                    </div>
                                     
                                     {selectedSolicitud ? (
                                         <div className="bg-blue-50/50 p-6 rounded-3xl border-2 border-blue-400 space-y-4">
@@ -713,20 +739,59 @@
                             </section>
                         )}
 
-                        {/* TAB 5: CUENTAS CORRIENTES Y COMISIONES (NUEVO) */}
+                        {/* TAB 5: CUENTAS CORRIENTES Y COMISIONES (Buscador inteligente de cliente) */}
                         {activeTab === 'cuentas' && (
                             <section className="space-y-6">
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                    {/* Selector de Cliente y Carga de Movimientos */}
                                     <div className="lg:col-span-1 bg-white p-6 border-2 border-slate-400 rounded-3xl shadow-md h-fit text-xs font-bold space-y-4">
                                         <h3 className="font-black text-slate-950 uppercase text-xs text-blue-900 border-b pb-2">💳 Registrar Movimiento en Cuenta</h3>
                                         
-                                        <div>
-                                            <label className="text-slate-950 block mb-1">Seleccionar Cliente</label>
-                                            <select className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-black text-slate-950" value={selectedClienteCuenta} onChange={e => setSelectedClienteCuenta(e.target.value)}>
-                                                <option value="">-- SELECCIONÁ EL CLIENTE --</option>
-                                                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                                            </select>
+                                        <div className="relative">
+                                            <label className="text-slate-950 block mb-1">🔍 Buscar Cliente (Nombre o Dirección)</label>
+                                            <input 
+                                                type="text" 
+                                                placeholder="Escribí nombre o dirección..." 
+                                                className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold text-slate-950 outline-none focus:border-blue-600"
+                                                value={selectedClienteCuenta ? (clienteCuentaSeleccionadoObj?.nombre || "") : searchClienteCuentaQuery}
+                                                onChange={e => {
+                                                    setSearchClienteCuentaQuery(e.target.value);
+                                                    setSelectedClienteCuenta("");
+                                                    setShowClienteCuentaResults(true);
+                                                }}
+                                                onFocus={() => setShowClienteCuentaResults(true)}
+                                            />
+
+                                            {showClienteCuentaResults && !selectedClienteCuenta && clientesCuentaFiltrados.length > 0 && (
+                                                <div className="absolute top-full left-0 right-0 mt-1 bg-white border-2 border-slate-950 rounded-2xl shadow-xl z-50 overflow-hidden divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                                                    {clientesCuentaFiltrados.map(c => (
+                                                        <div 
+                                                            key={c.id} 
+                                                            className="p-3 hover:bg-blue-50 cursor-pointer transition"
+                                                            onClick={() => {
+                                                                setSelectedClienteCuenta(c.id);
+                                                                setSearchClienteCuentaQuery(c.nombre);
+                                                                setShowClienteCuentaResults(false);
+                                                            }}
+                                                        >
+                                                            <div className="font-black text-slate-950">{c.nombre}</div>
+                                                            <div className="text-[10px] text-slate-500 font-bold">📍 {c.direccion || 'Sin dirección'}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            {selectedClienteCuenta && (
+                                                <button 
+                                                    onClick={() => {
+                                                        setSelectedClienteCuenta("");
+                                                        setSearchClienteCuentaQuery("");
+                                                        setShowClienteCuentaResults(true);
+                                                    }}
+                                                    className="mt-1 text-[10px] text-blue-600 font-black hover:underline block uppercase"
+                                                >
+                                                    🔄 Cambiar cliente seleccionado
+                                                </button>
+                                            )}
                                         </div>
 
                                         {selectedClienteCuenta && (
@@ -747,7 +812,6 @@
                                         )}
                                     </div>
 
-                                    {/* Estado de Cuenta del Cliente Seleccionado */}
                                     <div className="lg:col-span-2 space-y-6">
                                         <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-md p-6 overflow-hidden">
                                             {selectedClienteCuenta ? (
@@ -801,12 +865,11 @@
                                                 </>
                                             ) : (
                                                 <div className="py-16 text-center text-slate-400 font-black uppercase text-xs">
-                                                    👈 Seleccioná un cliente de la izquierda para ver su Estado de Cuenta.
+                                                    👈 Buscá y seleccioná un cliente de la izquierda para abrir su Estado de Cuenta.
                                                 </div>
                                             )}
                                         </div>
 
-                                        {/* CALCULADORA DE COMISIONES POR VENTA COBRADA */}
                                         <div className="bg-slate-950 text-white p-6 rounded-3xl shadow-xl space-y-4 border-b-4 border-blue-600">
                                             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                                                 <h3 className="font-black text-sm uppercase tracking-wider text-blue-400">📊 Liquidación de Comisiones Mensuales</h3>
