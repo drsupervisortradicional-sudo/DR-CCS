@@ -14,7 +14,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800;900&display=swap');
         body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #f1f5f9; color: #0f172a; }
         @media print { #root { display: none !important; } }
     </style>
@@ -41,17 +41,31 @@
             const [activeTab, setActiveTab] = useState('crm');
             const [clientes, setClientes] = useState([]);
             const [listas, setListas] = useState([]);
+            const [solicitudes, setSolicitudes] = useState([]);
+            const [movimientos, setMovimientos] = useState([]);
             
-            // Controles de estados
+            // Controles y Buscadores
             const [editingCliente, setEditingCliente] = useState(null);
             const [activeListaId, setActiveListaId] = useState("");
             const [bulkData, setBulkData] = useState("");
             const [bulkClientesData, setBulkClientesData] = useState("");
-            const [crmSearch, setCrmSearch] = useState(""); // NUEVO: Buscador de CRM
+            
+            // Buscadores
+            const [crmSearch, setCrmSearch] = useState("");
+            const [crmListaFilter, setCrmListaFilter] = useState("");
             const [clienteSearch, setClienteSearch] = useState("");
             const [listaSearch, setListaSearch] = useState("");
 
-            // Carga de datos en tiempo real V3
+            // Cotizaciones Especiales
+            const [selectedSolicitud, setSelectedSolicitud] = useState(null);
+            const [descuentosCotizacion, setDescuentosCotizacion] = useState({});
+
+            // Cuentas Corrientes y Comisiones
+            const [selectedClienteCuenta, setSelectedClienteCuenta] = useState("");
+            const [mesComision, setMesComision] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+            const [pctComision, setPctComision] = useState(5);
+
+            // Carga en tiempo real de Firebase
             useEffect(() => {
                 const unsubClientes = db.collection("v3_clientes").onSnapshot(s => 
                     setClientes(s.docs.map(d => ({id: d.id, ...d.data()})))
@@ -59,10 +73,22 @@
                 const unsubListas = db.collection("v3_listas").onSnapshot(s => 
                     setListas(s.docs.map(d => ({id: d.id, ...d.data()})))
                 );
-                return () => { unsubClientes(); unsubListas(); };
+                const unsubSols = db.collection("solicitudes").orderBy("fecha", "desc").onSnapshot(s => 
+                    setSolicitudes(s.docs.map(d => ({id: d.id, ...d.data()})))
+                );
+                const unsubMovs = db.collection("v3_movimientos").onSnapshot(s => 
+                    setMovimientos(s.docs.map(d => ({id: d.id, ...d.data()})))
+                );
+                return () => { unsubClientes(); unsubListas(); unsubSols(); unsubMovs(); };
             }, []);
 
-            // CRM: Alertas de Agenda Comercial (MODIFICADO: Incluye buscador inteligente)
+            const parseMoney = (val) => {
+                if (val === undefined || val === null) return 0;
+                let clean = val.toString().replace("$", "").replace(/\./g, "").replace(",", ".");
+                return parseFloat(clean) || 0;
+            };
+
+            // CRM & AGENDA: Alertas con filtro avanzado de búsqueda y listas
             const agendaHoyFiltrada = useMemo(() => {
                 const hoy = new Date();
                 const query = crmSearch.toLowerCase().trim();
@@ -82,17 +108,15 @@
                     };
                 }).filter(c => c.tocaEnvio || c.tocaVisita);
 
-                // Aplica filtro por nombre, dirección o nombre de lista
                 return alertasBase.filter(c => {
                     const nombreMatch = (c.nombre || "").toLowerCase().includes(query);
                     const direccMatch = (c.direccion || "").toLowerCase().includes(query);
-                    const nombreLista = listas.find(l => l.id === c.lista_id)?.nombre_lista || "Base General";
-                    const listaMatch = nombreLista.toLowerCase().includes(query);
-                    return nombreMatch || direccMatch || listaMatch;
+                    const listaMatch = crmListaFilter === "" || c.lista_id === crmListaFilter;
+                    return (nombreMatch || direccMatch) && listaMatch;
                 });
-            }, [clientes, crmSearch, listas]);
+            }, [clientes, crmSearch, crmListaFilter]);
 
-            // Buscador inteligente para la Cartera de Clientes
+            // Cartera de clientes filtrada
             const clientesFiltrados = useMemo(() => {
                 const query = clienteSearch.toLowerCase().trim();
                 return clientes.filter(c => {
@@ -104,13 +128,7 @@
                 });
             }, [clientes, clienteSearch, listas]);
 
-            const parseMoney = (val) => {
-                if (val === undefined || val === null) return 0;
-                let clean = val.toString().replace("$", "").replace(/\./g, "").replace(",", ".");
-                return parseFloat(clean) || 0;
-            };
-
-            // CRUD Clientes Individual
+            // CRUD Cliente Individual
             const handleSaveCliente = async (e) => {
                 e.preventDefault();
                 const f = e.target;
@@ -130,11 +148,10 @@
                 f.reset();
             };
 
-            // Importación Masiva de Clientes con Descuento
+            // Importación Masiva Clientes
             const handleBulkClientesImport = async () => {
                 const rows = bulkClientesData.trim().split("\n");
                 const batch = db.batch();
-                
                 rows.forEach(row => {
                     const cols = row.split("\t");
                     if (cols.length >= 2) {
@@ -158,12 +175,12 @@
                 });
                 await batch.commit();
                 setBulkClientesData("");
-                alert("Cartera de clientes importada y vinculada de forma exitosa.");
+                alert("Cartera importada exitosamente.");
             };
 
-            // Creación de una nueva Lista Comercial
+            // Crear Nueva Lista
             const handleCreateLista = async () => {
-                const nombre = prompt("Nombre de la nueva Lista de Precios (Ej: MAYORISTA, SUPERMERCADOS):");
+                const nombre = prompt("Nombre de la nueva Lista de Precios:");
                 if(!nombre) return;
                 const id = "lista_" + Date.now();
                 await db.collection("v3_listas").doc(id).set({
@@ -172,13 +189,9 @@
                 });
             };
 
-            // Importación masiva de Productos DIRECTO
+            // Inyectar Excel a la Lista seleccionada
             const handleBulkProductosListaImport = async () => {
-                if(!activeListaId) {
-                    alert("⚠️ Por favor, seleccioná primero una Lista de la izquierda.");
-                    return;
-                }
-
+                if(!activeListaId) return alert("Seleccioná una lista de la izquierda.");
                 const rows = bulkData.trim().split("\n");
                 const listaActual = listas.find(l => l.id === activeListaId);
                 let productosActuales = listaActual?.productos ? [...listaActual.productos] : [];
@@ -201,27 +214,21 @@
 
                 await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
                 setBulkData("");
-                alert(`¡Éxito! Se cargaron los productos y precios específicos.`);
+                alert("Productos inyectados correctamente.");
             };
 
-            // MODIFICADO: Edición TOTAL de todos los campos de un producto en caliente
+            // Edición Completa en Caliente de Producto
             const handleEditProductoInLista = async (p) => {
-                const nuevoNombre = prompt("Editar descripción / marca del artículo:", p.name);
-                if (nuevoNombre === null) return; // Cancela el flujo si toca cancelar
+                const nuevoNombre = prompt("Descripción / Marca del artículo:", p.name);
+                if (nuevoNombre === null) return;
 
-                const nuevoPrecioInput = prompt("Editar precio específico de lista:", p.price);
+                const nuevoPrecioInput = prompt("Precio específico ($):", p.price);
                 if (nuevoPrecioInput === null) return;
-                const nuevoPrecio = parseMoney(nuevoPrecioInput);
 
                 const nuevoPack = parseInt(prompt("Unidades por bulto (Pack):", p.pack)) || 1;
-                
-                const nuevaCategoriaInput = prompt("Editar Rubro / Categoría:", p.category || "VARIOS");
-                const nuevaCategoria = nuevaCategoriaInput ? nuevaCategoriaInput.trim().toUpperCase() : "VARIOS";
-
-                const nuevaImagen = prompt("Editar URL de la imagen (Dejar vacío si no tiene):", p.imageUrl || "");
-
-                const esOfertaInput = prompt("¿Está en Oferta? (Escribir SI o NO):", p.es_oferta ? "SI" : "NO");
-                const nuevaOferta = esOfertaInput ? esOfertaInput.trim().toUpperCase() === "SI" : false;
+                const nuevaCatInput = prompt("Rubro / Categoría:", p.category || "VARIOS");
+                const nuevaImagen = prompt("URL de la imagen (Opcional):", p.imageUrl || "");
+                const esOfertaInput = prompt("¿Está en Oferta? (SI / NO):", p.es_oferta ? "SI" : "NO");
 
                 const listaActual = listas.find(l => l.id === activeListaId);
                 const productosActualizados = listaActual.productos.map(item => {
@@ -229,52 +236,55 @@
                         return { 
                             ...item, 
                             name: nuevoNombre.trim(),
-                            price: nuevoPrecio, 
+                            price: parseMoney(nuevoPrecioInput), 
                             pack: nuevoPack, 
-                            category: nuevaCategoria,
+                            category: (nuevaCatInput || "VARIOS").trim().toUpperCase(),
                             imageUrl: nuevaImagen.trim(),
-                            es_oferta: nuevaOferta 
+                            es_oferta: esOfertaInput ? esOfertaInput.trim().toUpperCase() === "SI" : false 
                         };
                     }
                     return item;
                 });
 
                 await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActualizados });
-                alert("Producto modificado en todos sus campos de forma exitosa.");
+                alert("Producto modificado.");
             };
 
-            // Agregar Producto Especial (Temporal)
-            const addTemporalProductToList = () => {
-                if(!activeListaId) return alert("Seleccioná primero una lista.");
-                const name = prompt("Descripción del producto especial:");
-                const priceInput = prompt("Precio unitario:");
-                if (!name || !priceInput) return;
-                const price = parseMoney(priceInput);
-                const pack = parseInt(prompt("Unidades por bulto:")) || 1;
+            // REPARADO: Botón de Producto Especial
+            const addTemporalProductToList = async () => {
+                if(!activeListaId) return alert("Por favor, seleccioná primero una lista del panel izquierdo.");
                 
+                const name = prompt("Descripción del producto especial solicitante:");
+                if (!name || !name.trim()) return;
+
+                const priceInput = prompt("Precio unitario acordado ($):");
+                if (priceInput === null) return;
+
+                const pack = parseInt(prompt("Unidades por bulto (Pack):", "1")) || 1;
+                const catInput = prompt("Rubro / Categoría:", "ESPECIALES");
+
                 const listaActual = listas.find(l => l.id === activeListaId);
                 let productosActuales = listaActual?.productos ? [...listaActual.productos] : [];
                 
                 productosActuales.push({
                     id: "temp_" + Date.now(),
-                    name: "(ESPECIAL) " + name,
-                    price: price,
+                    name: "(ESPECIAL) " + name.trim(),
+                    price: parseMoney(priceInput),
                     pack: pack,
-                    category: "ESPECIALES",
+                    category: (catInput || "ESPECIALES").trim().toUpperCase(),
                     es_oferta: false,
                     isTemp: true
                 });
 
-                db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
-                alert("Producto especial inyectado en esta lista.");
+                await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
+                alert("✨ Producto Especial inyectado con éxito en esta lista.");
             };
 
-            // Descarga de PDF de la Lista Seleccionada
+            // IMPRIMIR PDF LISTA
             const printDocumentLista = () => {
                 if(!activeListaId) return alert("Seleccioná una lista.");
                 const listaActual = listas.find(l => l.id === activeListaId);
                 const fecha = new Date().toLocaleDateString();
-                
                 const prodsLista = listaActual?.productos || [];
                 const prodsOrdenados = [...prodsLista].sort((a,b) => (a.name || "").localeCompare(b.name || ""));
                 const categories = [...new Set(prodsOrdenados.map(p => p.category || "VARIOS"))].sort();
@@ -319,36 +329,136 @@
                 window.open(`https://wa.me/${cliente.telefono}?text=${encodeURIComponent(msg)}`);
             };
 
+            // COTIZACIONES ESPECIALES
+            const totalSolicitudCotizada = useMemo(() => {
+                if (!selectedSolicitud) return 0;
+                return selectedSolicitud.items.reduce((acc, item) => {
+                    const desc = descuentosCotizacion[item.id] || 0;
+                    const precioBase = item.precio_custom !== undefined ? item.precio_custom : (item.price || 0);
+                    const precioConDesc = precioBase * (1 - desc / 100);
+                    return acc + (item.cantidad * precioConDesc * (item.pack || 1));
+                }, 0);
+            }, [selectedSolicitud, descuentosCotizacion]);
+
+            const enviarCotizacionEspecialWA = async () => {
+                if (!selectedSolicitud) return;
+                let msg = `*PRESUPUESTO ESPECIAL COTIZADO - DR DISTRIBUCIONES*\n\n`;
+                msg += `*Cliente:* ${selectedSolicitud.cliente}\n`;
+                msg += `\n---------------------------------------\n\n`;
+                
+                selectedSolicitud.items.forEach(item => {
+                    const desc = descuentosCotizacion[item.id] || 0;
+                    const precioBase = item.precio_custom !== undefined ? item.precio_custom : (item.price || 0);
+                    const precioFinalUn = precioBase * (1 - desc / 100);
+                    const subtotalItem = item.cantidad * precioFinalUn * (item.pack || 1);
+
+                    msg += `• *${item.name}*\n`;
+                    msg += `  ${item.cantidad} bultos x ${item.pack || 1} un.\n`;
+                    msg += `  Precio Un: $${precioFinalUn.toFixed(2)}\n`;
+                    msg += `  Subtotal: $${subtotalItem.toFixed(2)}\n\n`;
+                });
+
+                msg += `---------------------------------------\n`;
+                msg += `*TOTAL NETO A PAGAR: $ ${totalSolicitudCotizada.toFixed(2)}*\n\n`;
+                msg += `_Precios preferenciales cerrados por volumen._`;
+
+                await db.collection("solicitudes").doc(selectedSolicitud.id).update({ estado: "cotizado" });
+                setSelectedSolicitud(null);
+                setDescuentosCotizacion({});
+                window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
+            };
+
+            // CUENTAS CORRIENTES Y COMISIONES
+            const handleGuardarMovimiento = async (e) => {
+                e.preventDefault();
+                const f = e.target;
+                if (!selectedClienteCuenta) return alert("Seleccioná un cliente.");
+
+                await db.collection("v3_movimientos").add({
+                    cliente_id: selectedClienteCuenta,
+                    tipo: f.m_tipo.value, // FACTURA o COBRO
+                    nro_factura: f.m_factura.value.trim(),
+                    fecha: f.m_fecha.value,
+                    monto: parseMoney(f.m_monto.value),
+                    observaciones: f.m_obs.value.trim(),
+                    fecha_registro: new Date().toISOString()
+                });
+
+                f.reset();
+                alert("Movimiento registrado.");
+            };
+
+            const clienteCuentaSeleccionadoObj = useMemo(() => {
+                return clientes.find(c => c.id === selectedClienteCuenta);
+            }, [clientes, selectedClienteCuenta]);
+
+            const movimientosClienteActual = useMemo(() => {
+                if (!selectedClienteCuenta) return [];
+                return movimientos.filter(m => m.cliente_id === selectedClienteCuenta)
+                                  .sort((a,b) => (b.fecha || "").localeCompare(a.fecha || ""));
+            }, [movimientos, selectedClienteCuenta]);
+
+            const saldoClienteActual = useMemo(() => {
+                return movimientosClienteActual.reduce((acc, m) => {
+                    return m.tipo === 'FACTURA' ? acc + m.monto : acc - m.monto;
+                }, 0);
+            }, [movimientosClienteActual]);
+
+            // Cálculo de Comisiones por Cobros Efectivos del Mes
+            const cobrosDelMes = useMemo(() => {
+                return movimientos.filter(m => m.tipo === 'COBRO' && m.fecha && m.fecha.startsWith(mesComision));
+            }, [movimientos, mesComision]);
+
+            const totalCobradoMes = useMemo(() => {
+                return cobrosDelMes.reduce((acc, m) => acc + (m.monto || 0), 0);
+            }, [cobrosDelMes]);
+
+            const comisionCalculada = useMemo(() => {
+                return totalCobradoMes * (pctComision / 100);
+            }, [totalCobradoMes, pctComision]);
+
             return (
                 <div className="min-h-screen flex flex-col bg-slate-200 text-slate-950 font-medium">
                     <header className="bg-slate-950 text-white p-6 shadow-xl flex justify-between items-center border-b-4 border-blue-600">
                         <div>
                             <h1 className="text-3xl font-black tracking-tight text-blue-400">VentasIQ Master <span className="text-white text-xs px-3 py-1 bg-blue-600 rounded-md ml-2 font-bold uppercase tracking-widest">CRM v3</span></h1>
-                            <p className="text-sm text-slate-300 font-bold mt-0.5">Control Comercial de Listas Independientes — DR Distribuciones</p>
+                            <p className="text-sm text-slate-300 font-bold mt-0.5">Gestión Comercial & Cuentas Corrientes — DR Distribuciones</p>
                         </div>
                     </header>
 
-                    <nav className="bg-white border-b-4 border-slate-300 flex p-2 sticky top-0 z-40 shadow-md text-xs font-black uppercase tracking-wider">
-                        <button onClick={() => setActiveTab('crm')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'crm' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📊 CRM & Agenda ({agendaHoyFiltrada.length})</button>
-                        <button onClick={() => setActiveTab('clientes')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'clientes' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>👥 Cartera Clientes ({clientes.length})</button>
-                        <button onClick={() => setActiveTab('listas')} className={`flex-1 py-4 text-center rounded-xl transition ${activeTab === 'listas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📋 Gestión de Listas de Precios</button>
+                    <nav className="bg-white border-b-4 border-slate-300 flex p-1.5 sticky top-0 z-40 shadow-md text-xs font-black uppercase tracking-wider overflow-x-auto">
+                        <button onClick={() => setActiveTab('crm')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'crm' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📊 CRM & Agenda ({agendaHoyFiltrada.length})</button>
+                        <button onClick={() => setActiveTab('clientes')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'clientes' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>👥 Cartera Clientes ({clientes.length})</button>
+                        <button onClick={() => setActiveTab('listas')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'listas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📋 Gestión Listas</button>
+                        <button onClick={() => setActiveTab('cotizaciones')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'cotizaciones' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📥 Cotizaciones ({solicitudes.length})</button>
+                        <button onClick={() => setActiveTab('cuentas')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'cuentas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>💰 Cuentas & Comisiones</button>
                     </nav>
 
                     <main className="p-4 md:p-8 max-w-6xl mx-auto w-full flex-1">
                         
-                        {/* TAB 1: CRM & AGENDA (MODIFICADO: Incluye buscador de Hoja de Ruta) */}
+                        {/* TAB 1: CRM & AGENDA (MODIFICADO: Buscador + Filtro por Lista de Precios) */}
                         {activeTab === 'crm' && (
                             <section className="space-y-6">
-                                <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-lg p-6 overflow-hidden">
+                                <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-lg p-6">
                                     <h3 className="font-black text-slate-950 mb-4 uppercase text-xs tracking-widest text-blue-900 border-b pb-2">Hojas de Ruta y Envíos Pendientes</h3>
                                     
-                                    {/* NUEVO: Buscador inteligente para el CRM */}
-                                    <div className="mb-4 bg-slate-100 p-3 rounded-2xl border flex items-center">
-                                        <input type="text" placeholder="🔍 Filtrar agenda del día por nombre de comercio, dirección o lista de precios..." className="w-full p-3 border-2 border-slate-950 rounded-xl text-xs font-bold text-slate-950 outline-none" value={crmSearch} onChange={e => setCrmSearch(e.target.value)} />
+                                    {/* BUSCADOR COMBINADO CRM */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6 bg-slate-100 p-4 rounded-2xl border-2 border-slate-300">
+                                        <div className="sm:col-span-2">
+                                            <label className="text-[10px] font-black uppercase text-slate-600 mb-1 block">🔍 Buscar Cliente o Dirección</label>
+                                            <input type="text" placeholder="Escribí nombre o dirección..." className="w-full p-3 border-2 border-slate-950 rounded-xl text-xs font-bold text-slate-950 outline-none bg-white" value={crmSearch} onChange={e => setCrmSearch(e.target.value)} />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-black uppercase text-slate-600 mb-1 block">📋 Filtrar por Lista de Precios</label>
+                                            <select className="w-full p-3 border-2 border-slate-950 rounded-xl text-xs font-black text-slate-950 bg-white" value={crmListaFilter} onChange={e => setCrmListaFilter(e.target.value)}>
+                                                <option value="">-- TODAS LAS LISTAS --</option>
+                                                {listas.map(l => <option key={l.id} value={l.id}>{l.nombre_lista}</option>)}
+                                            </select>
+                                        </div>
                                     </div>
 
                                     {agendaHoyFiltrada.length === 0 ? (
-                                        <p className="text-center py-10 text-base text-slate-500 font-black uppercase">🎉 Ninguna alerta coincide con el criterio.</p>
+                                        <p className="text-center py-10 text-base text-slate-500 font-black uppercase">🎉 No hay envíos pendientes con ese criterio.</p>
                                     ) : (
                                         <div className="divide-y-2 divide-slate-200">
                                             {agendaHoyFiltrada.map(c => (
@@ -382,10 +492,10 @@
                                         <button onClick={async () => { if(confirm("¿Vaciar clientes?")) db.collection("v3_clientes").get().then(s=>s.forEach(d=>d.ref.delete())); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-red-800">🗑️ Vaciar Cartera</button>
                                     </div>
                                     <div className="bg-blue-950 p-3 rounded-xl border-2 border-slate-950 font-mono text-[11px] font-black text-cyan-400 mb-3 text-center tracking-wide shadow-inner">
-                                        Nombre Cliente [TAB] WhatsApp [TAB] Dirección [TAB] Nombre exacto de la Lista [TAB] Descuento % (Ej: 5.5 o dejar vacío)
+                                        Nombre Cliente [TAB] WhatsApp [TAB] Dirección [TAB] Nombre exacto de Lista [TAB] Descuento % (Ej: 5.5)
                                     </div>
                                     <textarea className="w-full h-24 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pega clientes desde Excel..." value={bulkClientesData} onChange={e => setBulkClientesData(e.target.value)} />
-                                    <button onClick={handleBulkClientesImport} className="w-full bg-slate-950 text-white py-3.5 rounded-xl mt-2 font-black uppercase text-xs tracking-widest shadow-md">Subir Cartera de Clientes con Descuentos</button>
+                                    <button onClick={handleBulkClientesImport} className="w-full bg-slate-950 text-white py-3.5 rounded-xl mt-2 font-black uppercase text-xs tracking-widest shadow-md">Subir Cartera con Descuentos</button>
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -445,7 +555,7 @@
                             </section>
                         )}
 
-                        {/* TAB 3: GESTION DE LISTAS */}
+                        {/* TAB 3: GESTIÓN DE LISTAS DE PRECIOS */}
                         {activeTab === 'listas' && (
                             <section className="space-y-6">
                                 <div className="flex justify-between items-center bg-white p-4 border-2 border-slate-400 rounded-2xl shadow-md">
@@ -469,17 +579,18 @@
                                             <>
                                                 <div className="bg-orange-50 p-6 rounded-3xl border-2 border-orange-400 shadow-md">
                                                     <div className="flex justify-between items-center mb-2">
-                                                        <h3 className="font-black text-orange-950 text-sm uppercase tracking-wider">📥 Inyectar Excel de Productos a: <span className="text-blue-700">{listas.find(l=>l.id===activeListaId)?.nombre_lista}</span></h3>
+                                                        <h3 className="font-black text-orange-950 text-sm uppercase tracking-wider">📥 Inyectar Excel a: <span className="text-blue-700">{listas.find(l=>l.id===activeListaId)?.nombre_lista}</span></h3>
                                                         <button onClick={async () => { if(confirm("¿Vaciar esta lista?")) await db.collection("v3_listas").doc(activeListaId).update({productos: []}); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-3 py-1.5 rounded-lg border border-red-800">Vaciar Lista</button>
                                                     </div>
                                                     <div className="bg-orange-950 p-3 rounded-xl border-2 border-slate-950 font-mono text-[11px] font-black text-yellow-400 mb-3 text-center shadow-inner">
-                                                        Producto [TAB] Precio Especifico [TAB] Pack [TAB] Categoría [TAB] Imagen URL [TAB] Oferta (Escribir SI o dejar vacío)
+                                                        Producto [TAB] Precio Especifico [TAB] Pack [TAB] Categoría [TAB] Imagen URL [TAB] Oferta (SI/NO)
                                                     </div>
-                                                    <textarea className="w-full h-20 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pegá acá las celdas de tu Excel para esta lista..." value={bulkData} onChange={e => setBulkData(e.target.value)} />
-                                                    <div className="flex gap-2 mt-2 font-black text-xs">
-                                                        <button onClick={handleBulkProductosListaImport} className="flex-1 bg-slate-950 text-white py-3 rounded-xl shadow-md uppercase tracking-wider">Subir e Inyectar Excel a esta Lista</button>
-                                                        <button onClick={addTemporalProductToList} className="bg-purple-600 text-white px-4 rounded-xl uppercase shadow-md">✨ Producto Especial</button>
-                                                        <button onClick={printDocumentLista} className="bg-blue-600 text-white px-4 rounded-xl uppercase shadow-md">📄 Imprimir PDF</button>
+                                                    <textarea className="w-full h-20 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pegá acá las celdas de tu Excel..." value={bulkData} onChange={e => setBulkData(e.target.value)} />
+                                                    <div className="flex flex-wrap gap-2 mt-2 font-black text-xs">
+                                                        <button onClick={handleBulkProductosListaImport} className="flex-1 bg-slate-950 text-white py-3 rounded-xl shadow-md uppercase tracking-wider min-w-[200px]">Subir Excel a esta Lista</button>
+                                                        {/* REPARADO: Botón de Producto Especial */}
+                                                        <button onClick={addTemporalProductToList} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-3 rounded-xl uppercase shadow-md transition flex items-center gap-1">✨ Producto Especial</button>
+                                                        <button onClick={printDocumentLista} className="bg-blue-600 text-white px-5 py-3 rounded-xl uppercase shadow-md">📄 Imprimir PDF</button>
                                                     </div>
                                                 </div>
 
@@ -506,7 +617,6 @@
                                                                             {p.es_oferta && <span className="bg-red-100 text-red-600 px-2 py-0.5 text-[9px] rounded-md font-black ml-2 uppercase">🔥 Oferta</span>}
                                                                         </td>
                                                                         <td className="p-4 text-right space-x-3">
-                                                                            {/* MODIFICADO: Ahora edita de forma nativa todos los campos del producto */}
                                                                             <button onClick={() => handleEditProductoInLista(p)} className="text-blue-600 font-bold uppercase text-[11px]">Editar</button>
                                                                             <button onClick={async () => {
                                                                                 if(confirm("¿Eliminar de la lista?")) {
@@ -523,9 +633,203 @@
                                             </>
                                         ) : (
                                             <div className="bg-white border-2 border-slate-400 rounded-3xl p-20 text-center text-slate-500 font-black uppercase text-xs">
-                                                👈 Seleccioná una Lista de Precios del panel izquierdo para cargarle mercadería o revisarla.
+                                                👈 Seleccioná una Lista de Precios del panel izquierdo.
                                             </div>
                                         )}
+                                    </div>
+                                </div>
+                            </section>
+                        )}
+
+                        {/* TAB 4: COTIZACIONES ESPECIALES (NUEVO: Integrado de especial.html) */}
+                        {activeTab === 'cotizaciones' && (
+                            <section className="space-y-6">
+                                <div className="bg-white border-2 border-slate-400 rounded-3xl p-6 shadow-md">
+                                    <h3 className="font-black text-slate-950 text-sm uppercase tracking-wider mb-4 border-b pb-2 text-blue-900">📥 Solicitudes Entrantes de Cotización</h3>
+                                    
+                                    {selectedSolicitud ? (
+                                        <div className="bg-blue-50/50 p-6 rounded-3xl border-2 border-blue-400 space-y-4">
+                                            <div className="flex justify-between items-start border-b border-blue-200 pb-3">
+                                                <div>
+                                                    <h4 className="font-black text-slate-950 text-xl">{selectedSolicitud.cliente}</h4>
+                                                    <p className="text-xs text-slate-700 font-bold">📍 Dirección: {selectedSolicitud.direccion || '---'}</p>
+                                                    {selectedSolicitud.notas && <p className="text-xs text-purple-800 font-black mt-1">📝 Observaciones: {selectedSolicitud.notas}</p>}
+                                                </div>
+                                                <button onClick={() => { setSelectedSolicitud(null); setDescuentosCotizacion({}); }} className="text-xs bg-slate-950 text-white px-4 py-2 rounded-xl font-bold uppercase">Volver</button>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                {selectedSolicitud.items.map(item => {
+                                                    const desc = descuentosCotizacion[item.id] || 0;
+                                                    const precioBase = item.precio_custom !== undefined ? item.precio_custom : (item.price || 0);
+                                                    const precioNetoCalculado = precioBase * (1 - desc / 100);
+                                                    return (
+                                                        <div key={item.id} className="flex flex-col sm:flex-row justify-between sm:items-center bg-white p-4 rounded-2xl border-2 border-slate-300">
+                                                            <div className="flex-1">
+                                                                <p className="font-black text-base text-slate-950">{item.name}</p>
+                                                                <p className="text-xs text-slate-600 font-bold">Bultos: {item.cantidad} | Pack x{item.pack || 1} un.</p>
+                                                                <p className="text-xs text-blue-800 font-black mt-1">Neto Unitario: $ {precioNetoCalculado.toFixed(2)}</p>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                                                                <span className="text-xs font-black">% Desc:</span>
+                                                                <input type="number" min="0" max="100" placeholder="0" className="w-20 p-2 border-2 border-blue-600 bg-white rounded-xl text-center font-black text-blue-900" value={descuentosCotizacion[item.id] || ""} onChange={e => setDescuentosCotizacion({...descuentosCotizacion, [item.id]: parseFloat(e.target.value) || 0})} />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+
+                                            <div className="pt-4 border-t-2 border-blue-200 flex justify-between items-center bg-slate-950 text-white p-6 rounded-2xl">
+                                                <div>
+                                                    <p className="text-xs font-bold uppercase text-blue-400">Total Cotización Cerrada</p>
+                                                    <p className="text-3xl font-black text-white">$ {totalSolicitudCotizada.toFixed(2)}</p>
+                                                </div>
+                                                <button onClick={enviarCotizacionEspecialWA} className="bg-green-600 hover:bg-green-700 text-white font-black px-6 py-4 rounded-xl uppercase text-xs shadow-md">
+                                                    🚀 Enviar Presupuesto por WhatsApp
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="divide-y-2 divide-slate-100">
+                                            {solicitudes.length === 0 ? (
+                                                <p className="text-center py-10 text-slate-500 font-black uppercase text-xs">No hay solicitudes entrantes</p>
+                                            ) : (
+                                                solicitudes.map(sol => (
+                                                    <div key={sol.id} className="py-4 flex justify-between items-center">
+                                                        <div>
+                                                            <h4 className="font-black text-slate-950 text-base">{sol.cliente}</h4>
+                                                            <p className="text-xs text-slate-600 font-bold">{sol.items?.length || 0} productos solicitados | Estado: <span className={sol.estado === 'pendiente' ? 'text-orange-600 font-black' : 'text-green-600 font-black'}>{sol.estado}</span></p>
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <button onClick={() => setSelectedSolicitud(sol)} className="bg-blue-600 text-white font-black text-xs px-4 py-2 rounded-xl uppercase">Cotizar</button>
+                                                            <button onClick={async () => { if(confirm("¿Eliminar solicitud?")) db.collection("solicitudes").doc(sol.id).delete(); }} className="text-red-500 font-black text-xs px-2">🗑️</button>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
+                        )}
+
+                        {/* TAB 5: CUENTAS CORRIENTES Y COMISIONES (NUEVO) */}
+                        {activeTab === 'cuentas' && (
+                            <section className="space-y-6">
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    {/* Selector de Cliente y Carga de Movimientos */}
+                                    <div className="lg:col-span-1 bg-white p-6 border-2 border-slate-400 rounded-3xl shadow-md h-fit text-xs font-bold space-y-4">
+                                        <h3 className="font-black text-slate-950 uppercase text-xs text-blue-900 border-b pb-2">💳 Registrar Movimiento en Cuenta</h3>
+                                        
+                                        <div>
+                                            <label className="text-slate-950 block mb-1">Seleccionar Cliente</label>
+                                            <select className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-black text-slate-950" value={selectedClienteCuenta} onChange={e => setSelectedClienteCuenta(e.target.value)}>
+                                                <option value="">-- SELECCIONÁ EL CLIENTE --</option>
+                                                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+                                            </select>
+                                        </div>
+
+                                        {selectedClienteCuenta && (
+                                            <form onSubmit={handleGuardarMovimiento} className="space-y-3 pt-2 border-t">
+                                                <div>
+                                                    <label className="text-slate-950 block mb-1">Tipo de Movimiento</label>
+                                                    <select name="m_tipo" className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-black text-slate-950">
+                                                        <option value="FACTURA">📄 FACTURA / VENTA REAL</option>
+                                                        <option value="COBRO">💵 COBRO / PAGO RECIBIDO</option>
+                                                    </select>
+                                                </div>
+                                                <div><label className="text-slate-950 block mb-1">N° de Factura / Remito (Opcional)</label><input name="m_factura" placeholder="Ej: FC 0001-00004589" className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
+                                                <div><label className="text-slate-950 block mb-1">Fecha</label><input type="date" name="m_fecha" defaultValue={new Date().toISOString().split('T')[0]} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
+                                                <div><label className="text-slate-950 block mb-1">Monto Neto ($)</label><input name="m_monto" placeholder="0.00" className="w-full p-3 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-900 text-sm" required /></div>
+                                                <div><label className="text-slate-950 block mb-1">Observaciones / Medio de Pago</label><input name="m_obs" placeholder="Ej: Efectivo, Transf. Galicia..." className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
+                                                <button type="submit" className="w-full bg-slate-950 text-white p-3.5 rounded-xl font-black uppercase mt-2 shadow-md">Imputar Movimiento</button>
+                                            </form>
+                                        )}
+                                    </div>
+
+                                    {/* Estado de Cuenta del Cliente Seleccionado */}
+                                    <div className="lg:col-span-2 space-y-6">
+                                        <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-md p-6 overflow-hidden">
+                                            {selectedClienteCuenta ? (
+                                                <>
+                                                    <div className="flex justify-between items-center border-b pb-4 mb-4">
+                                                        <div>
+                                                            <h3 className="font-black text-slate-950 text-xl">{clienteCuentaSeleccionadoObj?.nombre}</h3>
+                                                            <p className="text-xs text-slate-600 font-bold">📍 {clienteCuentaSeleccionadoObj?.direccion || 'Sin dirección'}</p>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">Saldo Pendiente</span>
+                                                            <span className={`text-2xl font-black ${saldoClienteActual > 0 ? 'text-red-600' : 'text-green-600'}`}>$ {saldoClienteActual.toFixed(2)}</span>
+                                                        </div>
+                                                    </div>
+
+                                                    <table className="w-full text-left border-collapse text-xs">
+                                                        <thead className="bg-slate-950 text-white text-[10px] uppercase font-bold tracking-widest">
+                                                            <tr>
+                                                                <th className="p-3">Fecha / Tipo</th>
+                                                                <th className="p-3">Detalle / Factura</th>
+                                                                <th className="p-3 text-right">Monto</th>
+                                                                <th className="p-3 text-right">Acción</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y font-bold">
+                                                            {movimientosClienteActual.length === 0 ? (
+                                                                <tr><td colSpan="4" className="p-8 text-center text-slate-400 uppercase">Sin movimientos registrados</td></tr>
+                                                            ) : (
+                                                                movimientosClienteActual.map(m => (
+                                                                    <tr key={m.id} className="hover:bg-slate-50">
+                                                                        <td className="p-3">
+                                                                            <span className="font-black text-slate-950">{m.fecha}</span>
+                                                                            <br/>
+                                                                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase ${m.tipo === 'FACTURA' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>{m.tipo}</span>
+                                                                        </td>
+                                                                        <td className="p-3 text-slate-800">
+                                                                            {m.nro_factura && <span className="font-black block">{m.nro_factura}</span>}
+                                                                            <span className="text-slate-600 text-[11px]">{m.observaciones || '---'}</span>
+                                                                        </td>
+                                                                        <td className={`p-3 text-right font-black text-sm ${m.tipo === 'FACTURA' ? 'text-slate-950' : 'text-green-700'}`}>
+                                                                            {m.tipo === 'FACTURA' ? `+$ ${m.monto.toFixed(2)}` : `-$ ${m.monto.toFixed(2)}`}
+                                                                        </td>
+                                                                        <td className="p-3 text-right">
+                                                                            <button onClick={async () => { if(confirm("¿Eliminar?")) db.collection("v3_movimientos").doc(m.id).delete(); }} className="text-red-500 font-bold uppercase text-[10px]">Borrar</button>
+                                                                        </td>
+                                                                    </tr>
+                                                                ))
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+                                                </>
+                                            ) : (
+                                                <div className="py-16 text-center text-slate-400 font-black uppercase text-xs">
+                                                    👈 Seleccioná un cliente de la izquierda para ver su Estado de Cuenta.
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* CALCULADORA DE COMISIONES POR VENTA COBRADA */}
+                                        <div className="bg-slate-950 text-white p-6 rounded-3xl shadow-xl space-y-4 border-b-4 border-blue-600">
+                                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                                                <h3 className="font-black text-sm uppercase tracking-wider text-blue-400">📊 Liquidación de Comisiones Mensuales</h3>
+                                                <div className="flex items-center gap-2">
+                                                    <input type="month" className="p-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-white outline-none" value={mesComision} onChange={e => setMesComision(e.target.value)} />
+                                                    <div className="flex items-center gap-1 bg-slate-900 border border-slate-700 p-2 rounded-xl">
+                                                        <span className="text-xs font-bold">%</span>
+                                                        <input type="number" className="w-12 bg-transparent font-black text-xs text-center text-blue-400 outline-none" value={pctComision} onChange={e => setPctComision(parseFloat(e.target.value) || 0)} />
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 gap-4 text-center pt-2">
+                                                <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800">
+                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Total Venta Cobrada en el Mes</span>
+                                                    <span className="text-2xl font-black text-white">$ {totalCobradoMes.toFixed(2)}</span>
+                                                </div>
+                                                <div className="bg-blue-600 p-4 rounded-2xl border border-blue-500 shadow-md">
+                                                    <span className="text-[10px] uppercase font-bold text-blue-100 block mb-1">Comisión a Cobrar ({pctComision}%)</span>
+                                                    <span className="text-2xl font-black text-white">$ {comisionCalculada.toFixed(2)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </section>
