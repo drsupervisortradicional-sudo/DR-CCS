@@ -60,10 +60,11 @@
             const [selectedSolicitud, setSelectedSolicitud] = useState(null);
             const [descuentosCotizacion, setDescuentosCotizacion] = useState({});
 
-            // Cuentas Corrientes y Comisiones (Buscador inteligente de cliente)
+            // Cuentas Corrientes, Saldos e Inactivos
             const [selectedClienteCuenta, setSelectedClienteCuenta] = useState("");
             const [searchClienteCuentaQuery, setSearchClienteCuentaQuery] = useState("");
             const [showClienteCuentaResults, setShowClienteCuentaResults] = useState(false);
+            const [saldoFiltroTipo, setSaldoFiltroTipo] = useState("TODOS"); // TODOS | DEUDORES | FAVOR
             const [mesComision, setMesComision] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
             const [pctComision, setPctComision] = useState(5);
 
@@ -90,7 +91,7 @@
                 return parseFloat(clean) || 0;
             };
 
-            // CRM & AGENDA: Alertas con filtro avanzado de búsqueda y listas
+            // CRM & AGENDA: Alertas con filtro avanzado
             const agendaHoyFiltrada = useMemo(() => {
                 const hoy = new Date();
                 const query = crmSearch.toLowerCase().trim();
@@ -130,15 +131,38 @@
                 });
             }, [clientes, clienteSearch, listas]);
 
-            // BUSCADOR INTELIGENTE PARA CUENTAS CORRIENTES
-            const clientesCuentaFiltrados = useMemo(() => {
+            // BUSCADOR INTELIGENTE Y CÁLCULO DE SALDOS PARA CUENTAS CORRIENTES
+            const clientesConSaldoCalculado = useMemo(() => {
+                return clientes.map(c => {
+                    const movsCliente = movimientos.filter(m => m.cliente_id === c.id);
+                    const saldo = movsCliente.reduce((acc, m) => {
+                        return m.tipo === 'FACTURA' ? acc + (m.monto || 0) : acc - (m.monto || 0);
+                    }, 0);
+                    return { ...c, saldo };
+                });
+            }, [clientes, movimientos]);
+
+            // LISTADO DE SALDOS CON FILTROS INTELIGENTES
+            const clientesSaldosFiltrados = useMemo(() => {
                 const q = searchClienteCuentaQuery.toLowerCase().trim();
-                if (!q) return [];
-                return clientes.filter(c => 
-                    (c.nombre || "").toLowerCase().includes(q) || 
-                    (c.direccion || "").toLowerCase().includes(q)
-                ).slice(0, 8);
-            }, [clientes, searchClienteCuentaQuery]);
+                return clientesConSaldoCalculado.filter(c => {
+                    const matchTexto = (c.nombre || "").toLowerCase().includes(q) || (c.direccion || "").toLowerCase().includes(q);
+                    if (!matchTexto) return false;
+
+                    if (saldoFiltroTipo === 'DEUDORES') return c.saldo > 0;
+                    if (saldoFiltroTipo === 'FAVOR') return c.saldo <= 0;
+                    return true;
+                });
+            }, [clientesConSaldoCalculado, searchClienteCuentaQuery, saldoFiltroTipo]);
+
+            // NUEVO: CLIENTES INACTIVOS EN EL MES EN CURSO (Sin facturas ni cobros en este mes)
+            const clientesInactivosMes = useMemo(() => {
+                const mesActual = new Date().toISOString().slice(0, 7); // YYYY-MM
+                return clientes.filter(c => {
+                    const movsMes = movimientos.filter(m => m.cliente_id === c.id && m.fecha && m.fecha.startsWith(mesActual));
+                    return movsMes.length === 0;
+                });
+            }, [clientes, movimientos]);
 
             // CRUD Cliente Individual
             const handleSaveCliente = async (e) => {
@@ -201,7 +225,7 @@
                 });
             };
 
-            // Inyectar Excel a la Lista seleccionada
+            // Inyectar Excel a Lista
             const handleBulkProductosListaImport = async () => {
                 if(!activeListaId) return alert("Seleccioná una lista de la izquierda.");
                 const rows = bulkData.trim().split("\n");
@@ -229,7 +253,7 @@
                 alert("Productos inyectados correctamente.");
             };
 
-            // Edición Completa en Caliente de Producto
+            // Edición Completa en Caliente
             const handleEditProductoInLista = async (p) => {
                 const nuevoNombre = prompt("Descripción / Marca del artículo:", p.name);
                 if (nuevoNombre === null) return;
@@ -262,7 +286,7 @@
                 alert("Producto modificado.");
             };
 
-            // Botón de Producto Especial
+            // Botón Producto Especial
             const addTemporalProductToList = async () => {
                 if(!activeListaId) return alert("Por favor, seleccioná primero una lista del panel izquierdo.");
                 
@@ -289,7 +313,7 @@
                 });
 
                 await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
-                alert("✨ Producto Especial inyectado con éxito en esta lista.");
+                alert("✨ Producto Especial inyectado con éxito.");
             };
 
             // IMPRIMIR PDF LISTA
@@ -341,11 +365,9 @@
                 window.open(`https://wa.me/${cliente.telefono}?text=${encodeURIComponent(msg)}`);
             };
 
-            // NUEVO: Enviar Presupuestador Especial abriendo el buscador libre de contactos de WhatsApp
             const compartirPresupuestadorWA = () => {
                 const linkEspecial = `${window.location.origin}${window.location.pathname.replace('admin_v2.html', 'especial.html')}`;
                 const msg = `Hola! Te dejamos nuestro *Catálogo y Presupuestador de Pedidos Especiales*. Podés armar tu lista de bultos y enviarnos tu solicitud de cotización ingresando acá:\n\n${linkEspecial}`;
-                // Al no poner "phone=", abre la lista libre de contactos en WhatsApp
                 window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
             };
 
@@ -388,7 +410,7 @@
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
 
-            // CUENTAS CORRIENTES Y COMISIONES
+            // CUENTAS CORRIENTES Y MOVIMIENTOS
             const handleGuardarMovimiento = async (e) => {
                 e.preventDefault();
                 const f = e.target;
@@ -658,13 +680,12 @@
                             </section>
                         )}
 
-                        {/* TAB 4: COTIZACIONES ESPECIALES (NUEVO: Botón para enviar Presupuestador a contacto de WhatsApp) */}
+                        {/* TAB 4: COTIZACIONES ESPECIALES */}
                         {activeTab === 'cotizaciones' && (
                             <section className="space-y-6">
                                 <div className="bg-white border-2 border-slate-400 rounded-3xl p-6 shadow-md">
                                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-4 border-b pb-3">
                                         <h3 className="font-black text-slate-950 text-sm uppercase tracking-wider text-blue-900">📥 Solicitudes Entrantes de Cotización</h3>
-                                        {/* NUEVO: Botón WhatsApp abre buscador libre de contactos */}
                                         <button 
                                             onClick={compartirPresupuestadorWA} 
                                             className="bg-green-600 hover:bg-green-700 text-white font-black px-5 py-3 rounded-2xl text-xs uppercase shadow-md transition flex items-center justify-center gap-2"
@@ -739,79 +760,101 @@
                             </section>
                         )}
 
-                        {/* TAB 5: CUENTAS CORRIENTES Y COMISIONES (Buscador inteligente de cliente) */}
+                        {/* TAB 5: CUENTAS CORRIENTES, SALDOS Y CLIENTES INACTIVOS */}
                         {activeTab === 'cuentas' && (
                             <section className="space-y-6">
+                                
+                                {/* NUEVO: DETECTOR DE CLIENTES INACTIVOS EN EL MES EN CURSO */}
+                                <div className="bg-purple-950 text-white p-6 rounded-3xl shadow-xl border-b-4 border-purple-500 space-y-3">
+                                    <div className="flex justify-between items-center border-b border-purple-800 pb-2">
+                                        <h3 className="font-black text-sm uppercase tracking-wider text-purple-300">💤 Alerta de Clientes Inactivos (Sin movimientos este mes)</h3>
+                                        <span className="bg-purple-800 text-purple-200 font-black text-xs px-3 py-1 rounded-full">{clientesInactivosMes.length} Inactivos</span>
+                                    </div>
+                                    <p className="text-xs text-purple-200 font-bold">Estos clientes no registran compras ni pagos en lo que va del mes. Hacé clic para escribirles:</p>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                                        {clientesInactivosMes.length === 0 ? (
+                                            <p className="col-span-3 text-center py-4 text-xs font-black uppercase text-purple-300">🎉 ¡Excelente! Todos los clientes han tenido al menos un movimiento este mes.</p>
+                                        ) : (
+                                            clientesInactivosMes.map(c => (
+                                                <div key={c.id} className="bg-purple-900/60 p-3 rounded-xl border border-purple-700 flex justify-between items-center">
+                                                    <div className="truncate mr-2">
+                                                        <div className="font-black text-xs text-white truncate">{c.nombre}</div>
+                                                        <div className="text-[10px] text-purple-300 truncate">📍 {c.direccion || 'Sin direcc.'}</div>
+                                                    </div>
+                                                    <button onClick={() => registrarEnvioWsp(c)} className="bg-green-600 hover:bg-green-700 text-white font-black text-[10px] px-2.5 py-1.5 rounded-lg uppercase shadow shrink-0">
+                                                        💬 Contactar
+                                                    </button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    {/* COLUMNA IZQUIERDA: LISTADO GENERAL DE SALDOS CON FILTROS INTELIGENTES */}
                                     <div className="lg:col-span-1 bg-white p-6 border-2 border-slate-400 rounded-3xl shadow-md h-fit text-xs font-bold space-y-4">
-                                        <h3 className="font-black text-slate-950 uppercase text-xs text-blue-900 border-b pb-2">💳 Registrar Movimiento en Cuenta</h3>
+                                        <h3 className="font-black text-slate-950 uppercase text-xs text-blue-900 border-b pb-2">📊 Resumen General de Saldos</h3>
                                         
-                                        <div className="relative">
-                                            <label className="text-slate-950 block mb-1">🔍 Buscar Cliente (Nombre o Dirección)</label>
+                                        {/* BUSCADOR + BOTONES DE FILTRO */}
+                                        <div className="space-y-2">
                                             <input 
                                                 type="text" 
-                                                placeholder="Escribí nombre o dirección..." 
-                                                className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold text-slate-950 outline-none focus:border-blue-600"
-                                                value={selectedClienteCuenta ? (clienteCuentaSeleccionadoObj?.nombre || "") : searchClienteCuentaQuery}
-                                                onChange={e => {
-                                                    setSearchClienteCuentaQuery(e.target.value);
-                                                    setSelectedClienteCuenta("");
-                                                    setShowClienteCuentaResults(true);
-                                                }}
-                                                onFocus={() => setShowClienteCuentaResults(true)}
+                                                placeholder="🔍 Filtrar lista por nombre o direcc..." 
+                                                className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold text-slate-950 outline-none text-xs"
+                                                value={searchClienteCuentaQuery}
+                                                onChange={e => setSearchClienteCuentaQuery(e.target.value)}
                                             />
+                                            <div className="flex gap-1 text-[10px] font-black uppercase">
+                                                <button onClick={() => setSaldoFiltroTipo('TODOS')} className={`flex-1 py-1.5 rounded-lg border transition ${saldoFiltroTipo === 'TODOS' ? 'bg-slate-950 text-white border-slate-950' : 'bg-slate-100 text-slate-700'}`}>Todos</button>
+                                                <button onClick={() => setSaldoFiltroTipo('DEUDORES')} className={`flex-1 py-1.5 rounded-lg border transition ${saldoFiltroTipo === 'DEUDORES' ? 'bg-red-600 text-white border-red-700' : 'bg-slate-100 text-slate-700'}`}>Deudores</button>
+                                                <button onClick={() => setSaldoFiltroTipo('FAVOR')} className={`flex-1 py-1.5 rounded-lg border transition ${saldoFiltroTipo === 'FAVOR' ? 'bg-green-600 text-white border-green-700' : 'bg-slate-100 text-slate-700'}`}>Al Día / A Favor</button>
+                                            </div>
+                                        </div>
 
-                                            {showClienteCuentaResults && !selectedClienteCuenta && clientesCuentaFiltrados.length > 0 && (
-                                                <div className="absolute top-full left-0 right-0 mt-1 bg-white border-2 border-slate-950 rounded-2xl shadow-xl z-50 overflow-hidden divide-y divide-slate-100 max-h-56 overflow-y-auto">
-                                                    {clientesCuentaFiltrados.map(c => (
-                                                        <div 
-                                                            key={c.id} 
-                                                            className="p-3 hover:bg-blue-50 cursor-pointer transition"
-                                                            onClick={() => {
-                                                                setSelectedClienteCuenta(c.id);
-                                                                setSearchClienteCuentaQuery(c.nombre);
-                                                                setShowClienteCuentaResults(false);
-                                                            }}
-                                                        >
-                                                            <div className="font-black text-slate-950">{c.nombre}</div>
-                                                            <div className="text-[10px] text-slate-500 font-bold">📍 {c.direccion || 'Sin dirección'}</div>
+                                        {/* TABLA RESUMEN DE SALDOS */}
+                                        <div className="max-h-80 overflow-y-auto divide-y-2 divide-slate-100 border-2 border-slate-200 rounded-2xl">
+                                            {clientesSaldosFiltrados.length === 0 ? (
+                                                <p className="p-4 text-center text-slate-400 font-black uppercase text-[10px]">No se encontraron clientes con este filtro</p>
+                                            ) : (
+                                                clientesSaldosFiltrados.map(c => (
+                                                    <div 
+                                                        key={c.id} 
+                                                        onClick={() => setSelectedClienteCuenta(c.id)} 
+                                                        className={`p-3 cursor-pointer transition flex justify-between items-center ${selectedClienteCuenta === c.id ? 'bg-blue-100 border-l-4 border-blue-600' : 'hover:bg-slate-50'}`}
+                                                    >
+                                                        <div className="truncate mr-2">
+                                                            <div className="font-black text-slate-950 truncate">{c.nombre}</div>
+                                                            <div className="text-[10px] text-slate-500 truncate">📍 {c.direccion || 'Sin direcc.'}</div>
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            )}
-
-                                            {selectedClienteCuenta && (
-                                                <button 
-                                                    onClick={() => {
-                                                        setSelectedClienteCuenta("");
-                                                        setSearchClienteCuentaQuery("");
-                                                        setShowClienteCuentaResults(true);
-                                                    }}
-                                                    className="mt-1 text-[10px] text-blue-600 font-black hover:underline block uppercase"
-                                                >
-                                                    🔄 Cambiar cliente seleccionado
-                                                </button>
+                                                        <span className={`font-black text-xs shrink-0 ${c.saldo > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                            $ {c.saldo.toFixed(2)}
+                                                        </span>
+                                                    </div>
+                                                ))
                                             )}
                                         </div>
 
+                                        {/* REGISTRO DE MOVIMIENTOS SI HAY CLIENTE SELECCIONADO */}
                                         {selectedClienteCuenta && (
-                                            <form onSubmit={handleGuardarMovimiento} className="space-y-3 pt-2 border-t">
+                                            <form onSubmit={handleGuardarMovimiento} className="space-y-3 pt-3 border-t-2 border-slate-300">
+                                                <h4 className="font-black uppercase text-[11px] text-slate-800">➕ Cargar Factura o Cobro</h4>
                                                 <div>
-                                                    <label className="text-slate-950 block mb-1">Tipo de Movimiento</label>
-                                                    <select name="m_tipo" className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-black text-slate-950">
+                                                    <select name="m_tipo" className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl font-black text-slate-950">
                                                         <option value="FACTURA">📄 FACTURA / VENTA REAL</option>
                                                         <option value="COBRO">💵 COBRO / PAGO RECIBIDO</option>
                                                     </select>
                                                 </div>
-                                                <div><label className="text-slate-950 block mb-1">N° de Factura / Remito (Opcional)</label><input name="m_factura" placeholder="Ej: FC 0001-00004589" className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
-                                                <div><label className="text-slate-950 block mb-1">Fecha</label><input type="date" name="m_fecha" defaultValue={new Date().toISOString().split('T')[0]} className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
-                                                <div><label className="text-slate-950 block mb-1">Monto Neto ($)</label><input name="m_monto" placeholder="0.00" className="w-full p-3 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-900 text-sm" required /></div>
-                                                <div><label className="text-slate-950 block mb-1">Observaciones / Medio de Pago</label><input name="m_obs" placeholder="Ej: Efectivo, Transf. Galicia..." className="w-full p-3 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
-                                                <button type="submit" className="w-full bg-slate-950 text-white p-3.5 rounded-xl font-black uppercase mt-2 shadow-md">Imputar Movimiento</button>
+                                                <div><input name="m_factura" placeholder="N° Factura / Remito (Opcional)" className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
+                                                <div><input type="date" name="m_fecha" defaultValue={new Date().toISOString().split('T')[0]} className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" required /></div>
+                                                <div><input name="m_monto" placeholder="Monto ($)" className="w-full p-2.5 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-900 text-sm" required /></div>
+                                                <div><input name="m_obs" placeholder="Observaciones / Medio de Pago" className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl font-bold" /></div>
+                                                <button type="submit" className="w-full bg-slate-950 text-white p-3 rounded-xl font-black uppercase text-xs shadow-md">Imputar en Cuenta</button>
                                             </form>
                                         )}
                                     </div>
 
+                                    {/* COLUMNA DERECHA: ESTADO DETALLADO DEL CLIENTE + LIQUIDACIÓN COMISIONES */}
                                     <div className="lg:col-span-2 space-y-6">
                                         <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-md p-6 overflow-hidden">
                                             {selectedClienteCuenta ? (
@@ -855,7 +898,7 @@
                                                                             {m.tipo === 'FACTURA' ? `+$ ${m.monto.toFixed(2)}` : `-$ ${m.monto.toFixed(2)}`}
                                                                         </td>
                                                                         <td className="p-3 text-right">
-                                                                            <button onClick={async () => { if(confirm("¿Eliminar?")) db.collection("v3_movimientos").doc(m.id).delete(); }} className="text-red-500 font-bold uppercase text-[10px]">Borrar</button>
+                                                                            <button onClick={async () => { if(confirm("¿Eliminar movimiento?")) db.collection("v3_movimientos").doc(m.id).delete(); }} className="text-red-500 font-bold uppercase text-[10px]">Borrar</button>
                                                                         </td>
                                                                     </tr>
                                                                 ))
@@ -865,11 +908,12 @@
                                                 </>
                                             ) : (
                                                 <div className="py-16 text-center text-slate-400 font-black uppercase text-xs">
-                                                    👈 Buscá y seleccioná un cliente de la izquierda para abrir su Estado de Cuenta.
+                                                    👈 Tocá un cliente de la lista de la izquierda para abrir su Estado de Cuenta y cargar movimientos.
                                                 </div>
                                             )}
                                         </div>
 
+                                        {/* CALCULADORA DE COMISIONES POR VENTA COBRADA */}
                                         <div className="bg-slate-950 text-white p-6 rounded-3xl shadow-xl space-y-4 border-b-4 border-blue-600">
                                             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                                                 <h3 className="font-black text-sm uppercase tracking-wider text-blue-400">📊 Liquidación de Comisiones Mensuales</h3>
