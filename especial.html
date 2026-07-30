@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DR-CCS | Solicitud de Presupuesto</title>
+    <title>DR-CCS | Pedidos Especiales</title>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -38,6 +38,7 @@
         const App = () => {
             const [activeTab, setActiveTab] = useState('catalogo');
             const [products, setProducts] = useState([]);
+            const [nombreListaTitle, setNombreListaTitle] = useState("Catálogo Mayorista de Alta Demanda");
             const [searchTerm, setSearchTerm] = useState("");
             const [nombre, setNombre] = useState("");
             const [direccion, setDireccion] = useState("");
@@ -65,12 +66,31 @@
                 };
             }, []);
 
+            // NUEVA LÓGICA: Carga la lista específica de la URL o la base general por defecto
             useEffect(() => {
-                const unsubscribeProds = db.collection("productos").onSnapshot((snapshot) => {
-                    const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setProducts(prods);
-                });
-                return () => unsubscribeProds();
+                const params = new URLSearchParams(window.location.search);
+                const listaParamId = params.get('lista');
+
+                if (listaParamId) {
+                    // Si viene con id de lista en la URL, busca esa lista en v3_listas
+                    const unsubLista = db.collection("v3_listas").doc(listaParamId).onSnapshot((doc) => {
+                        if (doc.exists) {
+                            const data = doc.data();
+                            setProducts(data.productos || []);
+                            if (data.nombre_lista) {
+                                setNombreListaTitle(`Lista: ${data.nombre_lista}`);
+                            }
+                        }
+                    });
+                    return () => unsubLista();
+                } else {
+                    // Si entra directo, carga la colección general de productos
+                    const unsubscribeProds = db.collection("productos").onSnapshot((snapshot) => {
+                        const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setProducts(prods);
+                    });
+                    return () => unsubscribeProds();
+                }
             }, []);
 
             const sortedProducts = useMemo(() => {
@@ -116,11 +136,11 @@
                     id: p.id,
                     name: p.name,
                     cantidad: cart[p.id],
-                    pack: p.pack || 1
+                    pack: p.pack || 1,
+                    price: p.price || 0
                 }));
 
                 try {
-                    // 1. Guarda en Firebase para llevar el registro en la base de datos
                     await db.collection("solicitudes").add({
                         cliente: nombre,
                         direccion: direccion,
@@ -130,7 +150,6 @@
                         estado: "pendiente"
                     });
                     
-                    // 2. MODIFICADO: Generar texto automático detallado para WhatsApp
                     let mensajeWA = `🏛️ *Nueva Solicitud de Cotización (DR-CCS)*\n\n`;
                     mensajeWA += `👤 *Cliente:* ${nombre}\n`;
                     if (direccion.trim()) mensajeWA += `📍 *Dirección:* ${direccion}\n`;
@@ -142,20 +161,17 @@
                         mensajeWA += `${index + 1}. ${item.name} -> *${item.cantidad} bultos* (${totalUnidades.toLocaleString()} un.)\n`;
                     });
 
-                    // 3. Configura tu número (Reemplazá TU_NUMERO_DE_TELEFONO por tu celular, ej: 5493412345678 sin el +)
                     const nroTelefono = "5493416384086"; 
                     const urlWhatsApp = `https://api.whatsapp.com/send?phone=${nroTelefono}&text=${encodeURIComponent(mensajeWA)}`;
                     
-                    alert("¡Solicitud registrada con éxito! A continuación se abrirá WhatsApp para enviarnos el aviso.");
+                    alert("¡Solicitud registrada con éxito! Se abrirá WhatsApp para enviarnos la alerta.");
                     
-                    // Limpieza de estados
                     setCart({});
                     setNombre("");
                     setDireccion("");
                     setNotas("");
                     setActiveTab('catalogo');
 
-                    // Abre la ventana de WhatsApp de forma nativa
                     window.open(urlWhatsApp, '_blank');
 
                 } catch (error) {
@@ -189,7 +205,7 @@
                             <section>
                                 <div className="mb-8">
                                     <h1 className="text-4xl font-extrabold text-slate-900">DR - Especial</h1>
-                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">Catálogo Mayorista</p>
+                                    <p className="text-blue-600 text-xs font-bold uppercase tracking-widest">{nombreListaTitle}</p>
                                 </div>
                                 <input type="text" placeholder="Buscar productos..." className="w-full p-4 bg-slate-50 rounded-2xl mb-6 outline-none border focus:border-blue-500 shadow-inner" onChange={e => setSearchTerm(e.target.value)} />
                                 
