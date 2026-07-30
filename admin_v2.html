@@ -58,16 +58,19 @@
 
             // Cotizaciones Especiales
             const [selectedSolicitud, setSelectedSolicitud] = useState(null);
-            const [descuentosCotizacion, setDescuentosCotizacion] = useState({});
+            const [preciosCotizacion, setPreciosCotizacion] = useState({}); // Precios netos manuales
+            const [descuentosCotizacion, setDescuentosCotizacion] = useState({}); // Porcentajes
+            const [showListaModalWA, setShowListaModalWA] = useState(false);
+            const [listaEspecialSeleccionadaWA, setListaEspecialSeleccionadaWA] = useState("");
 
-            // Cuentas Corrientes, Saldos e Inactivos
+            // Cuentas Corrientes
             const [selectedClienteCuenta, setSelectedClienteCuenta] = useState("");
             const [searchClienteCuentaQuery, setSearchClienteCuentaQuery] = useState("");
-            const [saldoFiltroTipo, setSaldoFiltroTipo] = useState("TODOS"); // TODOS | DEUDORES | FAVOR
-            const [mesComision, setMesComision] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+            const [saldoFiltroTipo, setSaldoFiltroTipo] = useState("TODOS");
+            const [mesComision, setMesComision] = useState(new Date().toISOString().slice(0, 7));
             const [pctComision, setPctComision] = useState(5);
 
-            // Carga en tiempo real de Firebase
+            // Carga en tiempo real de Firebase con auto-actualización instántanea
             useEffect(() => {
                 const unsubClientes = db.collection("v3_clientes").onSnapshot(s => 
                     setClientes(s.docs.map(d => ({id: d.id, ...d.data()})))
@@ -75,9 +78,13 @@
                 const unsubListas = db.collection("v3_listas").onSnapshot(s => 
                     setListas(s.docs.map(d => ({id: d.id, ...d.data()})))
                 );
-                const unsubSols = db.collection("solicitudes").orderBy("fecha", "desc").onSnapshot(s => 
-                    setSolicitudes(s.docs.map(d => ({id: d.id, ...d.data()})))
-                );
+                
+                // NOTIFICACIÓN EN TIEMPO REAL AL RECIBIR SOLICITUDES
+                const unsubSols = db.collection("solicitudes").orderBy("fecha", "desc").onSnapshot(s => {
+                    const sols = s.docs.map(d => ({id: d.id, ...d.data()}));
+                    setSolicitudes(sols);
+                });
+
                 const unsubMovs = db.collection("v3_movimientos").onSnapshot(s => 
                     setMovimientos(s.docs.map(d => ({id: d.id, ...d.data()})))
                 );
@@ -130,44 +137,39 @@
                 });
             }, [clientes, clienteSearch, listas]);
 
-            // BUSCADOR INTELIGENTE Y CÁLCULO DE SALDOS EXACTOS (Redondeado a 2 decimales)
+            // SALDOS EXACTOS
             const clientesConSaldoCalculado = useMemo(() => {
                 return clientes.map(c => {
                     const movsCliente = movimientos.filter(m => m.cliente_id === c.id);
                     const saldoBruto = movsCliente.reduce((acc, m) => {
                         return m.tipo === 'FACTURA' ? acc + (m.monto || 0) : acc - (m.monto || 0);
                     }, 0);
-                    
-                    // CORRECCIÓN CLAVE: Redondeo seguro de precisión flotante a 2 decimales
                     const saldo = Math.round(saldoBruto * 100) / 100;
                     return { ...c, saldo };
                 });
             }, [clientes, movimientos]);
 
-            // LISTADO DE SALDOS CON FILTROS INTELIGENTES Y ESTRICTOS
             const clientesSaldosFiltrados = useMemo(() => {
                 const q = searchClienteCuentaQuery.toLowerCase().trim();
                 return clientesConSaldoCalculado.filter(c => {
                     const matchTexto = (c.nombre || "").toLowerCase().includes(q) || (c.direccion || "").toLowerCase().includes(q);
                     if (!matchTexto) return false;
 
-                    // FILTROS FINANCIEROS EXCLUSIVOS (Excluyen el $0.00 absoluto)
                     if (saldoFiltroTipo === 'DEUDORES') return c.saldo > 0.001;
                     if (saldoFiltroTipo === 'FAVOR') return c.saldo < -0.001;
-                    return true; // TODOS
+                    return true;
                 });
             }, [clientesConSaldoCalculado, searchClienteCuentaQuery, saldoFiltroTipo]);
 
-            // CLIENTES INACTIVOS EN EL MES EN CURSO
             const clientesInactivosMes = useMemo(() => {
-                const mesActual = new Date().toISOString().slice(0, 7); // YYYY-MM
+                const mesActual = new Date().toISOString().slice(0, 7);
                 return clientes.filter(c => {
                     const movsMes = movimientos.filter(m => m.cliente_id === c.id && m.fecha && m.fecha.startsWith(mesActual));
                     return movsMes.length === 0;
                 });
             }, [clientes, movimientos]);
 
-            // CRUD Cliente Individual
+            // CRUD Cliente
             const handleSaveCliente = async (e) => {
                 e.preventDefault();
                 const f = e.target;
@@ -187,7 +189,6 @@
                 f.reset();
             };
 
-            // Importación Masiva Clientes
             const handleBulkClientesImport = async () => {
                 const rows = bulkClientesData.trim().split("\n");
                 const batch = db.batch();
@@ -217,7 +218,6 @@
                 alert("Cartera importada exitosamente.");
             };
 
-            // Crear Nueva Lista
             const handleCreateLista = async () => {
                 const nombre = prompt("Nombre de la nueva Lista de Precios:");
                 if(!nombre) return;
@@ -228,7 +228,6 @@
                 });
             };
 
-            // Inyectar Excel a Lista
             const handleBulkProductosListaImport = async () => {
                 if(!activeListaId) return alert("Seleccioná una lista de la izquierda.");
                 const rows = bulkData.trim().split("\n");
@@ -256,7 +255,6 @@
                 alert("Productos inyectados correctamente.");
             };
 
-            // Edición Completa en Caliente
             const handleEditProductoInLista = async (p) => {
                 const nuevoNombre = prompt("Descripción / Marca del artículo:", p.name);
                 if (nuevoNombre === null) return;
@@ -289,7 +287,6 @@
                 alert("Producto modificado.");
             };
 
-            // Botón Producto Especial
             const addTemporalProductToList = async () => {
                 if(!activeListaId) return alert("Por favor, seleccioná primero una lista del panel izquierdo.");
                 
@@ -319,7 +316,6 @@
                 alert("✨ Producto Especial inyectado con éxito.");
             };
 
-            // IMPRIMIR PDF LISTA
             const printDocumentLista = () => {
                 if(!activeListaId) return alert("Seleccioná una lista.");
                 const listaActual = listas.find(l => l.id === activeListaId);
@@ -368,22 +364,46 @@
                 window.open(`https://wa.me/${cliente.telefono}?text=${encodeURIComponent(msg)}`);
             };
 
-            const compartirPresupuestadorWA = () => {
-                const linkEspecial = `${window.location.origin}${window.location.pathname.replace('admin_v2.html', 'especial.html')}`;
-                const msg = `Hola! Te dejamos nuestro *Catálogo y Presupuestador de Pedidos Especiales*. Podés armar tu lista de bultos y enviarnos tu solicitud de cotización ingresando acá:\n\n${linkEspecial}`;
+            // MODIFICADO: Envía el cotizador con la lista seleccionada previamente en el modal
+            const confirmarEnvioPresupuestadorWA = () => {
+                if (!listaEspecialSeleccionadaWA) return alert("Por favor, seleccioná una Lista de Precios.");
+                const linkEspecial = `${window.location.origin}${window.location.pathname.replace('admin_v2.html', 'especial.html')}?lista=${listaEspecialSeleccionadaWA}`;
+                const nombreLista = listas.find(l=>l.id===listaEspecialSeleccionadaWA)?.nombre_lista || "";
+                const msg = `Hola! Te dejamos nuestro *Catálogo y Presupuestador de Pedidos Especiales* [${nombreLista}]. Podés armar tu lista de bultos y enviarnos tu solicitud de cotización ingresando acá:\n\n${linkEspecial}`;
+                setShowListaModalWA(false);
                 window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
             };
 
-            // COTIZACIONES ESPECIALES
+            // MANEJO DE PRECIOS MANUALES Y PORCENTAJES EN COTIZACIONES
+            const handleCambioPrecioManualCotizacion = (itemId, precioIngresado, precioBase) => {
+                const pManual = parseMoney(precioIngresado);
+                setPreciosCotizacion({...preciosCotizacion, [itemId]: pManual});
+                
+                // Recalcula el porcentaje de descuento equivalente
+                if (precioBase > 0) {
+                    const descCalc = Math.max(0, Math.round((1 - (pManual / precioBase)) * 100 * 100) / 100);
+                    setDescuentosCotizacion({...descuentosCotizacion, [itemId]: descCalc});
+                }
+            };
+
+            const handleCambioPorcentajeCotizacion = (itemId, pctIngresado, precioBase) => {
+                const pct = parseFloat(pctIngresado) || 0;
+                setDescuentosCotizacion({...descuentosCotizacion, [itemId]: pct});
+                
+                // Recalcula el precio neto manual equivalente
+                const pNetoCalc = Math.round(precioBase * (1 - (pct / 100)) * 100) / 100;
+                setPreciosCotizacion({...preciosCotizacion, [itemId]: pNetoCalc});
+            };
+
+            // TOTAL COTIZACIÓN
             const totalSolicitudCotizada = useMemo(() => {
                 if (!selectedSolicitud) return 0;
                 return selectedSolicitud.items.reduce((acc, item) => {
-                    const desc = descuentosCotizacion[item.id] || 0;
                     const precioBase = item.precio_custom !== undefined ? item.precio_custom : (item.price || 0);
-                    const precioConDesc = precioBase * (1 - desc / 100);
-                    return acc + (item.cantidad * precioConDesc * (item.pack || 1));
+                    const precioFinalUn = preciosCotizacion[item.id] !== undefined ? preciosCotizacion[item.id] : precioBase;
+                    return acc + (item.cantidad * precioFinalUn * (item.pack || 1));
                 }, 0);
-            }, [selectedSolicitud, descuentosCotizacion]);
+            }, [selectedSolicitud, preciosCotizacion]);
 
             const enviarCotizacionEspecialWA = async () => {
                 if (!selectedSolicitud) return;
@@ -392,9 +412,8 @@
                 msg += `\n---------------------------------------\n\n`;
                 
                 selectedSolicitud.items.forEach(item => {
-                    const desc = descuentosCotizacion[item.id] || 0;
                     const precioBase = item.precio_custom !== undefined ? item.precio_custom : (item.price || 0);
-                    const precioFinalUn = precioBase * (1 - desc / 100);
+                    const precioFinalUn = preciosCotizacion[item.id] !== undefined ? preciosCotizacion[item.id] : precioBase;
                     const subtotalItem = item.cantidad * precioFinalUn * (item.pack || 1);
 
                     msg += `• *${item.name}*\n`;
@@ -410,6 +429,7 @@
                 await db.collection("solicitudes").doc(selectedSolicitud.id).update({ estado: "cotizado" });
                 setSelectedSolicitud(null);
                 setDescuentosCotizacion({});
+                setPreciosCotizacion({});
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
 
@@ -460,7 +480,7 @@
             }, [totalCobradoMes, pctComision]);
 
             return (
-                <div className="min-h-screen flex flex-col bg-slate-200 text-slate-950 font-medium">
+                <div className="min-h-screen flex flex-col bg-slate-200 text-slate-950 font-medium relative">
                     <header className="bg-slate-950 text-white p-6 shadow-xl flex justify-between items-center border-b-4 border-blue-600">
                         <div>
                             <h1 className="text-3xl font-black tracking-tight text-blue-400">VentasIQ Master <span className="text-white text-xs px-3 py-1 bg-blue-600 rounded-md ml-2 font-bold uppercase tracking-widest">CRM v3</span></h1>
@@ -472,7 +492,12 @@
                         <button onClick={() => setActiveTab('crm')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'crm' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📊 CRM & Agenda ({agendaHoyFiltrada.length})</button>
                         <button onClick={() => setActiveTab('clientes')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'clientes' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>👥 Cartera Clientes ({clientes.length})</button>
                         <button onClick={() => setActiveTab('listas')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'listas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📋 Gestión Listas</button>
-                        <button onClick={() => setActiveTab('cotizaciones')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'cotizaciones' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>📥 Cotizaciones ({solicitudes.length})</button>
+                        <button onClick={() => setActiveTab('cotizaciones')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition relative ${activeTab === 'cotizaciones' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>
+                            📥 Cotizaciones ({solicitudes.length})
+                            {solicitudes.filter(s => s.estado === 'pendiente').length > 0 && (
+                                <span className="ml-1 bg-red-600 text-white px-2 py-0.5 rounded-full text-[10px] animate-pulse">!</span>
+                            )}
+                        </button>
                         <button onClick={() => setActiveTab('cuentas')} className={`flex-1 min-w-[140px] py-3.5 text-center rounded-xl transition ${activeTab === 'cuentas' ? 'bg-blue-600 text-white shadow-md font-black scale-102' : 'text-slate-800 hover:bg-slate-100'}`}>💰 Cuentas & Comisiones</button>
                     </nav>
 
@@ -681,14 +706,14 @@
                             </section>
                         )}
 
-                        {/* TAB 4: COTIZACIONES ESPECIALES */}
+                        {/* TAB 4: COTIZACIONES ESPECIALES (MODIFICADO: Edición de Precio Manual / Porcentaje) */}
                         {activeTab === 'cotizaciones' && (
                             <section className="space-y-6">
                                 <div className="bg-white border-2 border-slate-400 rounded-3xl p-6 shadow-md">
                                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 mb-4 border-b pb-3">
                                         <h3 className="font-black text-slate-950 text-sm uppercase tracking-wider text-blue-900">📥 Solicitudes Entrantes de Cotización</h3>
                                         <button 
-                                            onClick={compartirPresupuestadorWA} 
+                                            onClick={() => setShowListaModalWA(true)} 
                                             className="bg-green-600 hover:bg-green-700 text-white font-black px-5 py-3 rounded-2xl text-xs uppercase shadow-md transition flex items-center justify-center gap-2"
                                         >
                                             📲 Compartir Presupuestador Especial por WhatsApp
@@ -703,24 +728,49 @@
                                                     <p className="text-xs text-slate-700 font-bold">📍 Dirección: {selectedSolicitud.direccion || '---'}</p>
                                                     {selectedSolicitud.notas && <p className="text-xs text-purple-800 font-black mt-1">📝 Observaciones: {selectedSolicitud.notas}</p>}
                                                 </div>
-                                                <button onClick={() => { setSelectedSolicitud(null); setDescuentosCotizacion({}); }} className="text-xs bg-slate-950 text-white px-4 py-2 rounded-xl font-bold uppercase">Volver</button>
+                                                <button onClick={() => { setSelectedSolicitud(null); setDescuentosCotizacion({}); setPreciosCotizacion({}); }} className="text-xs bg-slate-950 text-white px-4 py-2 rounded-xl font-bold uppercase">Volver</button>
                                             </div>
 
                                             <div className="space-y-3">
                                                 {selectedSolicitud.items.map(item => {
-                                                    const desc = descuentosCotizacion[item.id] || 0;
                                                     const precioBase = item.precio_custom !== undefined ? item.precio_custom : (item.price || 0);
-                                                    const precioNetoCalculado = precioBase * (1 - desc / 100);
+                                                    const descActual = descuentosCotizacion[item.id] !== undefined ? descuentosCotizacion[item.id] : 0;
+                                                    const precioNetoActual = preciosCotizacion[item.id] !== undefined ? preciosCotizacion[item.id] : precioBase;
+
                                                     return (
-                                                        <div key={item.id} className="flex flex-col sm:flex-row justify-between sm:items-center bg-white p-4 rounded-2xl border-2 border-slate-300">
+                                                        <div key={item.id} className="flex flex-col sm:flex-row justify-between sm:items-center bg-white p-4 rounded-2xl border-2 border-slate-300 gap-3">
                                                             <div className="flex-1">
                                                                 <p className="font-black text-base text-slate-950">{item.name}</p>
                                                                 <p className="text-xs text-slate-600 font-bold">Bultos: {item.cantidad} | Pack x{item.pack || 1} un.</p>
-                                                                <p className="text-xs text-blue-800 font-black mt-1">Neto Unitario: $ {precioNetoCalculado.toFixed(2)}</p>
+                                                                {precioBase > 0 && <p className="text-[11px] text-slate-400 font-bold">Precio Base Lista: ${precioBase.toFixed(2)}</p>}
                                                             </div>
-                                                            <div className="flex items-center gap-2 mt-2 sm:mt-0">
-                                                                <span className="text-xs font-black">% Desc:</span>
-                                                                <input type="number" min="0" max="100" placeholder="0" className="w-20 p-2 border-2 border-blue-600 bg-white rounded-xl text-center font-black text-blue-900" value={descuentosCotizacion[item.id] || ""} onChange={e => setDescuentosCotizacion({...descuentosCotizacion, [item.id]: parseFloat(e.target.value) || 0})} />
+                                                            
+                                                            {/* NUEVO: Doble campo (Precio Manual $ / Porcentaje %) */}
+                                                            <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border border-slate-300">
+                                                                <div className="flex items-center gap-1">
+                                                                    <span className="text-[11px] font-black text-slate-700">$ Neto:</span>
+                                                                    <input 
+                                                                        type="number" 
+                                                                        step="0.01" 
+                                                                        placeholder="0.00" 
+                                                                        className="w-24 p-2 border-2 border-blue-600 bg-white rounded-lg text-center font-black text-blue-900 text-xs" 
+                                                                        value={preciosCotizacion[item.id] !== undefined ? preciosCotizacion[item.id] : ""} 
+                                                                        onChange={e => handleCambioPrecioManualCotizacion(item.id, e.target.value, precioBase)} 
+                                                                    />
+                                                                </div>
+
+                                                                <div className="flex items-center gap-1 border-l pl-3">
+                                                                    <span className="text-[11px] font-black text-slate-700">% Desc:</span>
+                                                                    <input 
+                                                                        type="number" 
+                                                                        min="0" 
+                                                                        max="100" 
+                                                                        placeholder="0" 
+                                                                        className="w-16 p-2 border-2 border-slate-400 bg-white rounded-lg text-center font-black text-slate-900 text-xs" 
+                                                                        value={descuentosCotizacion[item.id] !== undefined ? descuentosCotizacion[item.id] : ""} 
+                                                                        onChange={e => handleCambioPorcentajeCotizacion(item.id, e.target.value, precioBase)} 
+                                                                    />
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     );
@@ -761,21 +811,19 @@
                             </section>
                         )}
 
-                        {/* TAB 5: CUENTAS CORRIENTES, SALDOS Y CLIENTES INACTIVOS */}
+                        {/* TAB 5: CUENTAS CORRIENTES */}
                         {activeTab === 'cuentas' && (
                             <section className="space-y-6">
-                                
-                                {/* ALERTA DE CLIENTES INACTIVOS EN EL MES EN CURSO */}
                                 <div className="bg-purple-950 text-white p-6 rounded-3xl shadow-xl border-b-4 border-purple-500 space-y-3">
                                     <div className="flex justify-between items-center border-b border-purple-800 pb-2">
                                         <h3 className="font-black text-sm uppercase tracking-wider text-purple-300">💤 Alerta de Clientes Inactivos (Sin movimientos este mes)</h3>
                                         <span className="bg-purple-800 text-purple-200 font-black text-xs px-3 py-1 rounded-full">{clientesInactivosMes.length} Inactivos</span>
                                     </div>
-                                    <p className="text-xs text-purple-200 font-bold">Estos clientes no registran compras ni pagos en lo que va del mes. Hacé clic para escribirles:</p>
+                                    <p className="text-xs text-purple-200 font-bold">Estos clientes no registran compras ni pagos en lo que va del mes:</p>
                                     
                                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
                                         {clientesInactivosMes.length === 0 ? (
-                                            <p className="col-span-3 text-center py-4 text-xs font-black uppercase text-purple-300">🎉 ¡Excelente! Todos los clientes han tenido al menos un movimiento este mes.</p>
+                                            <p className="col-span-3 text-center py-4 text-xs font-black uppercase text-purple-300">🎉 Todos los clientes registran actividad este mes.</p>
                                         ) : (
                                             clientesInactivosMes.map(c => (
                                                 <div key={c.id} className="bg-purple-900/60 p-3 rounded-xl border border-purple-700 flex justify-between items-center">
@@ -793,11 +841,9 @@
                                 </div>
 
                                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                    {/* COLUMNA IZQUIERDA: LISTADO GENERAL DE SALDOS CON FILTROS STRICTOS */}
                                     <div className="lg:col-span-1 bg-white p-6 border-2 border-slate-400 rounded-3xl shadow-md h-fit text-xs font-bold space-y-4">
                                         <h3 className="font-black text-slate-950 uppercase text-xs text-blue-900 border-b pb-2">📊 Resumen General de Saldos</h3>
                                         
-                                        {/* BUSCADOR + BOTONES DE FILTRO */}
                                         <div className="space-y-2">
                                             <input 
                                                 type="text" 
@@ -813,10 +859,9 @@
                                             </div>
                                         </div>
 
-                                        {/* TABLA RESUMEN DE SALDOS CORREGIDA */}
                                         <div className="max-h-80 overflow-y-auto divide-y-2 divide-slate-100 border-2 border-slate-200 rounded-2xl">
                                             {clientesSaldosFiltrados.length === 0 ? (
-                                                <p className="p-4 text-center text-slate-400 font-black uppercase text-[10px]">No se encontraron clientes con este filtro</p>
+                                                <p className="p-4 text-center text-slate-400 font-black uppercase text-[10px]">Sin coincidencias</p>
                                             ) : (
                                                 clientesSaldosFiltrados.map(c => (
                                                     <div 
@@ -828,7 +873,6 @@
                                                             <div className="font-black text-slate-950 truncate">{c.nombre}</div>
                                                             <div className="text-[10px] text-slate-500 truncate">📍 {c.direccion || 'Sin direcc.'}</div>
                                                         </div>
-                                                        {/* COLORIMETRÍA CORREGIDA: Excluye el cero absoluto */}
                                                         <span className={`font-black text-xs shrink-0 ${c.saldo > 0.001 ? 'text-red-600' : (c.saldo < -0.001 ? 'text-green-600' : 'text-slate-400')}`}>
                                                             $ {c.saldo.toFixed(2)}
                                                         </span>
@@ -837,7 +881,6 @@
                                             )}
                                         </div>
 
-                                        {/* REGISTRO DE MOVIMIENTOS SI HAY CLIENTE SELECCIONADO */}
                                         {selectedClienteCuenta && (
                                             <form onSubmit={handleGuardarMovimiento} className="space-y-3 pt-3 border-t-2 border-slate-300">
                                                 <h4 className="font-black uppercase text-[11px] text-slate-800">➕ Cargar Factura o Cobro</h4>
@@ -856,7 +899,6 @@
                                         )}
                                     </div>
 
-                                    {/* COLUMNA DERECHA: ESTADO DETALLADO DEL CLIENTE + LIQUIDACIÓN COMISIONES */}
                                     <div className="lg:col-span-2 space-y-6">
                                         <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-md p-6 overflow-hidden">
                                             {selectedClienteCuenta ? (
@@ -910,12 +952,11 @@
                                                 </>
                                             ) : (
                                                 <div className="py-16 text-center text-slate-400 font-black uppercase text-xs">
-                                                    👈 Tocá un cliente de la lista de la izquierda para abrir su Estado de Cuenta y cargar movimientos.
+                                                    👈 Tocá un cliente de la lista de la izquierda para abrir su Estado de Cuenta.
                                                 </div>
                                             )}
                                         </div>
 
-                                        {/* CALCULADORA DE COMISIONES POR VENTA COBRADA */}
                                         <div className="bg-slate-950 text-white p-6 rounded-3xl shadow-xl space-y-4 border-b-4 border-blue-600">
                                             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                                                 <h3 className="font-black text-sm uppercase tracking-wider text-blue-400">📊 Liquidación de Comisiones Mensuales</h3>
@@ -944,6 +985,42 @@
                             </section>
                         )}
                     </main>
+
+                    {/* MODAL NUEVO: SELECCIÓN DE LISTA ANTES DE COMPARTIR PRESUPUESTADOR POR WHATSAPP */}
+                    {showListaModalWA && (
+                        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-3xl p-6 max-w-md w-full border-4 border-slate-950 shadow-2xl space-y-4">
+                                <h3 className="font-black text-slate-950 text-base uppercase border-b pb-2">📲 Seleccionar Lista para Presupuestar</h3>
+                                <p className="text-xs text-slate-600 font-bold">Elegí la Lista de Precios que va a ver el cliente/comedor al abrir el cotizador especial:</p>
+                                
+                                <select 
+                                    className="w-full p-3 bg-slate-100 border-2 border-slate-950 rounded-xl font-black text-xs text-slate-950 outline-none"
+                                    value={listaEspecialSeleccionadaWA}
+                                    onChange={e => setListaEspecialSeleccionadaWA(e.target.value)}
+                                >
+                                    <option value="">-- SELECCIONÁ UNA LISTA --</option>
+                                    {listas.map(l => (
+                                        <option key={l.id} value={l.id}>{l.nombre_lista} ({l.productos?.length || 0} productos)</option>
+                                    ))}
+                                </select>
+
+                                <div className="flex gap-2 pt-2">
+                                    <button 
+                                        onClick={() => setShowListaModalWA(false)} 
+                                        className="flex-1 bg-slate-200 text-slate-800 font-bold p-3 rounded-xl uppercase text-xs"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button 
+                                        onClick={confirmarEnvioPresupuestadorWA} 
+                                        className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black p-3 rounded-xl uppercase text-xs shadow-md"
+                                    >
+                                        Abrir WhatsApp
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         };
