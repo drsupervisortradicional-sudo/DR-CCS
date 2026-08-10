@@ -62,7 +62,7 @@
                         const cliData = { id: doc.id, ...doc.data() };
                         setCliente(cliData);
 
-                        // Si el cliente tiene una lista de precios asignada, la carga de v3_listas
+                        // Carga la lista vinculada o la base general
                         if (cliData.lista_id) {
                             db.collection("v3_listas").doc(cliData.lista_id).get().then(listaDoc => {
                                 if (listaDoc.exists) {
@@ -73,7 +73,6 @@
                                 setLoading(false);
                             });
                         } else {
-                            // Si no tiene lista asignada, usa la base general
                             db.collection("productos").get().then(snapshot => {
                                 setProductos(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
                                 setLoading(false);
@@ -85,7 +84,7 @@
                 });
             }, []);
 
-            // FILTRO DE PRODUCTOS: Se excluyen los que tienen precio $0 o no definido
+            // Filtra productos con precio > 0
             const productosValidos = useMemo(() => {
                 return productos.filter(p => (p.price || 0) > 0);
             }, [productos]);
@@ -94,7 +93,7 @@
                 return [...productosValidos].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
             }, [productosValidos]);
 
-            // Agrupación por Categorías
+            // Agrupa por categoría
             const categorizedProducts = useMemo(() => {
                 const filtered = sortedProducts.filter(p => (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()));
                 
@@ -111,12 +110,12 @@
                 }, {});
             }, [sortedProducts, searchTerm]);
 
-            // Artículos Seleccionados en Carrito
+            // Items seleccionados
             const selectedItems = useMemo(() => {
                 return sortedProducts.filter(p => cart[p.id] && cart[p.id] > 0);
             }, [sortedProducts, cart]);
 
-            // Cálculo exacto del Precio Final por producto aplicando Descuento Ficha
+            // Precio con descuento de ficha
             const calcularPrecioFinal = (p) => {
                 const descFicha = cliente?.descuento_extra || 0;
                 const precioBase = p.price || 0;
@@ -144,7 +143,7 @@
                     const precioUnFinal = calcularPrecioFinal(p);
                     const subtotal = cantBultos * precioUnFinal * (p.pack || 1);
                     
-                    msg += `• *${p.name}*\n`;
+                    msg += `• *${p.name}* ${p.es_oferta ? '[OFERTA]' : ''}\n`;
                     msg += `  ${cantBultos} bultos (x${p.pack || 1} un.) | Un: $${precioUnFinal.toFixed(2)}\n`;
                     msg += `  Subtotal: $${subtotal.toFixed(2)}\n\n`;
                 });
@@ -212,17 +211,31 @@
                                                     {categorizedProducts[catName].map(p => {
                                                         const precioFinal = calcularPrecioFinal(p);
                                                         return (
-                                                            <div key={p.id} className="border-2 border-slate-200 rounded-2xl p-4 flex flex-col justify-between bg-white shadow-sm hover:border-blue-300 transition">
+                                                            <div key={p.id} className="border-2 border-slate-200 rounded-2xl p-4 flex flex-col justify-between bg-white shadow-sm hover:border-blue-300 transition relative">
                                                                 <div>
-                                                                    <div className="w-full h-28 bg-slate-50 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-slate-200">
+                                                                    <div className="w-full h-28 bg-slate-50 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-slate-200 relative">
                                                                         {p.imageUrl ? (
                                                                             <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-1" />
                                                                         ) : (
                                                                             <span className="text-slate-300 text-2xl">🖼️</span>
                                                                         )}
+                                                                        
+                                                                        {/* ETIQUETA ROJA DE OFERTA EN IMAGEN */}
+                                                                        {p.es_oferta && (
+                                                                            <span className="absolute top-2 right-2 bg-red-600 text-white font-black text-[9px] uppercase px-2 py-0.5 rounded-md shadow-md">
+                                                                                🔥 Oferta
+                                                                            </span>
+                                                                        )}
                                                                     </div>
-                                                                    <h3 className="font-bold text-slate-900 text-sm leading-snug mb-1">{p.name}</h3>
-                                                                    <p className="text-xs font-black text-blue-700 uppercase mb-3">$ {precioFinal.toFixed(2)} un. | Pack x{p.pack || 1}</p>
+                                                                    
+                                                                    <h3 className="font-bold text-slate-900 text-sm leading-snug mb-1">
+                                                                        {p.name}
+                                                                    </h3>
+                                                                    
+                                                                    <p className="text-xs font-black text-blue-700 uppercase mb-3">
+                                                                        $ {precioFinal.toFixed(2)} un. | Pack x{p.pack || 1}
+                                                                        {p.es_oferta && <span className="text-red-600 font-black ml-1">[OFERTA]</span>}
+                                                                    </p>
                                                                 </div>
 
                                                                 <div className="space-y-2">
@@ -263,7 +276,9 @@
                                                 return (
                                                     <div key={p.id} className="p-4 flex justify-between items-center">
                                                         <div>
-                                                            <p className="font-bold text-slate-900 text-sm">{p.name}</p>
+                                                            <p className="font-bold text-slate-900 text-sm">
+                                                                {p.name} {p.es_oferta && <span className="text-red-600 font-black text-xs">[OFERTA]</span>}
+                                                            </p>
                                                             <p className="text-xs text-slate-500 font-bold">{cart[p.id]} bultos (x{p.pack || 1} un.) | $ {precioUnFinal.toFixed(2)} un.</p>
                                                         </div>
                                                         <p className="font-black text-slate-900 text-base">$ {subt.toFixed(2)}</p>
