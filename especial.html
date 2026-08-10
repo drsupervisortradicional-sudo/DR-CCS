@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DR-CCS | Pedidos Especiales</title>
+    <title>Solicitud de Presupuestos</title>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -66,13 +66,11 @@
                 };
             }, []);
 
-            // NUEVA LÓGICA: Carga la lista específica de la URL o la base general por defecto
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const listaParamId = params.get('lista');
 
                 if (listaParamId) {
-                    // Si viene con id de lista en la URL, busca esa lista en v3_listas
                     const unsubLista = db.collection("v3_listas").doc(listaParamId).onSnapshot((doc) => {
                         if (doc.exists) {
                             const data = doc.data();
@@ -84,7 +82,6 @@
                     });
                     return () => unsubLista();
                 } else {
-                    // Si entra directo, carga la colección general de productos
                     const unsubscribeProds = db.collection("productos").onSnapshot((snapshot) => {
                         const prods = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                         setProducts(prods);
@@ -93,9 +90,14 @@
                 }
             }, []);
 
-            const sortedProducts = useMemo(() => {
-                return [...products].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            // FILTRO DE PRODUCTOS: Se excluyen los que tienen precio $0 o no definido
+            const productosValidos = useMemo(() => {
+                return products.filter(p => (p.price || 0) > 0);
             }, [products]);
+
+            const sortedProducts = useMemo(() => {
+                return [...productosValidos].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+            }, [productosValidos]);
 
             const categorizedProducts = useMemo(() => {
                 const filtered = sortedProducts.filter(p => (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()));
@@ -211,7 +213,7 @@
                                 
                                 <div className="space-y-8">
                                     {Object.keys(categorizedProducts).length === 0 ? (
-                                        <p className="text-center text-slate-400 font-bold uppercase py-10">No se encontraron productos</p>
+                                        <p className="text-center text-slate-400 font-bold uppercase py-10">No se encontraron productos disponibles</p>
                                     ) : (
                                         Object.keys(categorizedProducts).map(categoryName => (
                                             <div key={categoryName} className="space-y-4">
