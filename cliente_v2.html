@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Catálogo de Pedidos</title>
+    <title>DR Distribuciones | Catálogo de Pedidos</title>
     <!-- Firebase Legacy Scripts -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -45,7 +45,21 @@
             const [searchTerm, setSearchTerm] = useState("");
             const [notasCliente, setNotasCliente] = useState("");
             const [loading, setLoading] = useState(true);
-            const [cart, setCart] = useState({});
+
+            // 1. CARGA INICIAL DEL CARRITO DESDE LOCALSTORAGE PARA EVITAR PÉRDIDA POR REFRESCAR
+            const [cart, setCart] = useState(() => {
+                const params = new URLSearchParams(window.location.search);
+                const clienteId = params.get('id') || 'general';
+                const saved = localStorage.getItem(`dr_cart_v3_${clienteId}`);
+                try { return saved ? JSON.parse(saved) : {}; } catch(e) { return {}; }
+            });
+
+            // 2. GUARDA AUTOMÁTICAMENTE CADA CAMBIO DEL CARRITO EN LA MEMORIA
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const clienteId = params.get('id') || 'general';
+                localStorage.setItem(`dr_cart_v3_${clienteId}`, JSON.stringify(cart));
+            }, [cart]);
 
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
@@ -56,13 +70,11 @@
                     return;
                 }
 
-                // Carga la ficha del cliente
                 db.collection("v3_clientes").doc(clienteId).get().then(doc => {
                     if (doc.exists) {
                         const cliData = { id: doc.id, ...doc.data() };
                         setCliente(cliData);
 
-                        // Carga la lista vinculada o la base general
                         if (cliData.lista_id) {
                             db.collection("v3_listas").doc(cliData.lista_id).get().then(listaDoc => {
                                 if (listaDoc.exists) {
@@ -84,7 +96,6 @@
                 });
             }, []);
 
-            // Filtra productos con precio > 0
             const productosValidos = useMemo(() => {
                 return productos.filter(p => (p.price || 0) > 0);
             }, [productos]);
@@ -93,7 +104,6 @@
                 return [...productosValidos].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
             }, [productosValidos]);
 
-            // Agrupa por categoría
             const categorizedProducts = useMemo(() => {
                 const filtered = sortedProducts.filter(p => (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()));
                 
@@ -110,12 +120,10 @@
                 }, {});
             }, [sortedProducts, searchTerm]);
 
-            // Items seleccionados
             const selectedItems = useMemo(() => {
                 return sortedProducts.filter(p => cart[p.id] && cart[p.id] > 0);
             }, [sortedProducts, cart]);
 
-            // Precio con descuento de ficha
             const calcularPrecioFinal = (p) => {
                 const descFicha = cliente?.descuento_extra || 0;
                 const precioBase = p.price || 0;
@@ -128,6 +136,13 @@
                     return acc + ((cart[p.id] || 0) * precioUn * (p.pack || 1));
                 }, 0);
             }, [selectedItems, cart, cliente]);
+
+            const vaciarCarrito = () => {
+                if (confirm("¿Deseas vaciar todos los productos del pedido?")) {
+                    setCart({});
+                    setNotasCliente("");
+                }
+            };
 
             const enviarPedidoWhatsApp = () => {
                 if (selectedItems.length === 0) return alert("Por favor, agregá al menos un producto al pedido.");
@@ -151,6 +166,10 @@
                 msg += `---------------------------------------\n`;
                 msg += `*TOTAL ESTIMADO: $ ${totalGeneral.toFixed(2)}*`;
 
+                // Vacía el carrito después de enviar exitosamente
+                setCart({});
+                setNotasCliente("");
+
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`, '_blank');
             };
 
@@ -168,7 +187,6 @@
             return (
                 <div className="max-w-4xl mx-auto md:my-6 bg-white shadow-2xl md:rounded-[2.5rem] flex flex-col min-h-screen md:min-h-0 border-4 border-slate-200 relative">
                     
-                    {/* ENCABEZADO CLIENTE */}
                     <header className="bg-slate-950 text-white p-6 md:rounded-t-[2.2rem] border-b-4 border-blue-600">
                         <div className="flex justify-between items-start">
                             <div>
@@ -178,7 +196,6 @@
                         </div>
                     </header>
 
-                    {/* STICKY NAV */}
                     <nav className="bg-white border-b-2 border-slate-200 flex p-1.5 sticky top-0 z-40 shadow-sm text-xs font-black uppercase">
                         <button onClick={() => setActiveTab('catalogo')} className={`flex-1 py-3.5 text-center rounded-xl transition ${activeTab === 'catalogo' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-700 hover:bg-slate-100'}`}>📋 Catálogo</button>
                         <button onClick={() => setActiveTab('pedido')} className={`flex-1 py-3.5 text-center rounded-xl transition relative ${activeTab === 'pedido' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-700 hover:bg-slate-100'}`}>
@@ -220,7 +237,6 @@
                                                                             <span className="text-slate-300 text-2xl">🖼️</span>
                                                                         )}
                                                                         
-                                                                        {/* ETIQUETA ROJA DE OFERTA EN IMAGEN */}
                                                                         {p.es_oferta && (
                                                                             <span className="absolute top-2 right-2 bg-red-600 text-white font-black text-[9px] uppercase px-2 py-0.5 rounded-md shadow-md">
                                                                                 🔥 Oferta
@@ -261,7 +277,7 @@
                                 <div className="flex justify-between items-center border-b pb-3">
                                     <h2 className="text-xl font-black text-slate-900">Resumen de tu Pedido</h2>
                                     {selectedItems.length > 0 && (
-                                        <button onClick={() => setCart({})} className="text-xs text-red-600 font-bold uppercase hover:underline">❌ Vaciar</button>
+                                        <button onClick={vaciarCarrito} className="text-xs text-red-600 font-bold uppercase hover:underline">❌ Vaciar</button>
                                     )}
                                 </div>
 
