@@ -56,23 +56,28 @@
             const [clienteSearch, setClienteSearch] = useState("");
             const [listaSearch, setListaSearch] = useState("");
 
-            // Cotizaciones Especiales
+            // Modales
+            const [showNuevoProductoModal, setShowNuevoProductoModal] = useState(false);
+            const [showAddProdModal, setShowAddProdModal] = useState(false);
+            const [addProdSearch, setAddProdSearch] = useState("");
+            const [showListaModalWA, setShowListaModalWA] = useState(false);
+            const [listaEspecialSeleccionadaWA, setListaEspecialSeleccionadaWA] = useState("");
+
+            // Cotizaciones
             const [selectedSolicitud, setSelectedSolicitud] = useState(null);
             const [preciosCotizacion, setPreciosCotizacion] = useState({});
             const [descuentosCotizacion, setDescuentosCotizacion] = useState({});
-            const [showListaModalWA, setShowListaModalWA] = useState(false);
-            const [listaEspecialSeleccionadaWA, setListaEspecialSeleccionadaWA] = useState("");
-            const [showAddProdModal, setShowAddProdModal] = useState(false);
-            const [addProdSearch, setAddProdSearch] = useState("");
 
-            // Cuentas Corrientes
+            // Cuentas Corrientes y Filtro por Mes
             const [selectedClienteCuenta, setSelectedClienteCuenta] = useState("");
             const [searchClienteCuentaQuery, setSearchClienteCuentaQuery] = useState("");
             const [saldoFiltroTipo, setSaldoFiltroTipo] = useState("TODOS");
+            const [mesMovimientosFiltro, setMesMovimientosFiltro] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+            const [verTodoHistorialCC, setVerTodoHistorialCC] = useState(false);
             const [mesComision, setMesComision] = useState(new Date().toISOString().slice(0, 7));
             const [pctComision, setPctComision] = useState(5);
 
-            // Carga en tiempo real de Firebase
+            // Carga en tiempo real
             useEffect(() => {
                 const unsubClientes = db.collection("v3_clientes").onSnapshot(s => 
                     setClientes(s.docs.map(d => ({id: d.id, ...d.data()})))
@@ -95,7 +100,6 @@
                 return parseFloat(clean) || 0;
             };
 
-            // Todos los productos unificados para búsqueda
             const todosLosProductosBase = useMemo(() => {
                 let prods = [];
                 listas.forEach(l => {
@@ -104,7 +108,7 @@
                 return prods;
             }, [listas]);
 
-            // CRM & AGENDA
+            // CRM & Agenda
             const agendaHoyFiltrada = useMemo(() => {
                 const hoy = new Date();
                 const query = crmSearch.toLowerCase().trim();
@@ -132,7 +136,7 @@
                 });
             }, [clientes, crmSearch, crmListaFilter]);
 
-            // Cartera de clientes
+            // Cartera
             const clientesFiltrados = useMemo(() => {
                 const query = clienteSearch.toLowerCase().trim();
                 return clientes.filter(c => {
@@ -144,7 +148,7 @@
                 });
             }, [clientes, clienteSearch, listas]);
 
-            // SALDOS EXACTOS
+            // Saldos CC
             const clientesConSaldoCalculado = useMemo(() => {
                 return clientes.map(c => {
                     const movsCliente = movimientos.filter(m => m.cliente_id === c.id);
@@ -252,6 +256,7 @@
                             pack: parseInt(cols[2]) || 1,
                             category: (cols[3] || "VARIOS").trim().toUpperCase(),
                             imageUrl: cols[4] ? cols[4].trim() : "",
+                            image_url: cols[4] ? cols[4].trim() : "",
                             es_oferta: cols[5] ? cols[5].trim().toUpperCase() === "SI" : false
                         });
                     }
@@ -262,6 +267,35 @@
                 alert("Productos inyectados correctamente.");
             };
 
+            // MODAL: ALTA DE PRODUCTO INDIVIDUAL
+            const handleGuardarNuevoProductoIndividual = async (e) => {
+                e.preventDefault();
+                if (!activeListaId) return alert("Seleccioná primero una lista.");
+
+                const f = e.target;
+                const listaActual = listas.find(l => l.id === activeListaId);
+                let productosActuales = listaActual?.productos ? [...listaActual.productos] : [];
+
+                const imgLink = f.np_imagen.value.trim();
+                const nuevoItem = {
+                    id: "prod_" + Date.now(),
+                    name: f.np_nombre.value.trim(),
+                    price: parseMoney(f.np_precio.value),
+                    pack: parseInt(f.np_pack.value) || 1,
+                    category: (f.np_categoria.value || "VARIOS").trim().toUpperCase(),
+                    imageUrl: imgLink,
+                    image_url: imgLink,
+                    es_oferta: f.np_oferta.checked
+                };
+
+                productosActuales.push(nuevoItem);
+                await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
+                setShowNuevoProductoModal(false);
+                f.reset();
+                alert("¡Producto individual agregado con éxito a la lista!");
+            };
+
+            // EDICIÓN EN CALIENTE: PRESERVA EXACTAMENTE EL LINK DE IMAGEN
             const handleEditProductoInLista = async (p) => {
                 const nuevoNombre = prompt("Descripción / Marca del artículo:", p.name);
                 if (nuevoNombre === null) return;
@@ -271,7 +305,11 @@
 
                 const nuevoPack = parseInt(prompt("Unidades por bulto (Pack):", p.pack)) || 1;
                 const nuevaCatInput = prompt("Rubro / Categoría:", p.category || "VARIOS");
-                const nuevaImagen = prompt("URL de la imagen (Opcional):", p.imageUrl || "");
+                
+                const urlOriginal = p.imageUrl || p.image_url || "";
+                const nuevaImagen = prompt("URL de la imagen (Dejar igual para conservar):", urlOriginal);
+                const imgFinal = nuevaImagen !== null ? nuevaImagen.trim() : urlOriginal;
+
                 const esOfertaInput = prompt("¿Está en Oferta? (SI / NO):", p.es_oferta ? "SI" : "NO");
 
                 const listaActual = listas.find(l => l.id === activeListaId);
@@ -283,7 +321,8 @@
                             price: parseMoney(nuevoPrecioInput), 
                             pack: nuevoPack, 
                             category: (nuevaCatInput || "VARIOS").trim().toUpperCase(),
-                            imageUrl: nuevaImagen.trim(),
+                            imageUrl: imgFinal,
+                            image_url: imgFinal,
                             es_oferta: esOfertaInput ? esOfertaInput.trim().toUpperCase() === "SI" : false 
                         };
                     }
@@ -291,36 +330,7 @@
                 });
 
                 await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActualizados });
-                alert("Producto modificado.");
-            };
-
-            const addTemporalProductToList = async () => {
-                if(!activeListaId) return alert("Por favor, seleccioná primero una lista del panel izquierdo.");
-                
-                const name = prompt("Descripción del producto especial solicitante:");
-                if (!name || !name.trim()) return;
-
-                const priceInput = prompt("Precio unitario acordado ($):");
-                if (priceInput === null) return;
-
-                const pack = parseInt(prompt("Unidades por bulto (Pack):", "1")) || 1;
-                const catInput = prompt("Rubro / Categoría:", "ESPECIALES");
-
-                const listaActual = listas.find(l => l.id === activeListaId);
-                let productosActuales = listaActual?.productos ? [...listaActual.productos] : [];
-                
-                productosActuales.push({
-                    id: "temp_" + Date.now(),
-                    name: "(ESPECIAL) " + name.trim(),
-                    price: parseMoney(priceInput),
-                    pack: pack,
-                    category: (catInput || "ESPECIALES").trim().toUpperCase(),
-                    es_oferta: false,
-                    isTemp: true
-                });
-
-                await db.collection("v3_listas").doc(activeListaId).update({ productos: productosActuales });
-                alert("✨ Producto Especial inyectado con éxito.");
+                alert("Producto modificado correctamente.");
             };
 
             const printDocumentLista = () => {
@@ -380,7 +390,7 @@
                 window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
             };
 
-            // COTIZACIONES: PRECIOS MANUALES Y PORCENTAJES
+            // Cotizaciones
             const handleCambioPrecioManualCotizacion = (itemId, precioIngresado, precioBase) => {
                 const pManual = parseMoney(precioIngresado);
                 setPreciosCotizacion({...preciosCotizacion, [itemId]: pManual});
@@ -399,7 +409,6 @@
                 setPreciosCotizacion({...preciosCotizacion, [itemId]: pNetoCalc});
             };
 
-            // FUNCIONES NUEVAS: AGREGAR / ELIMINAR PRODUCTOS EN COTIZACIÓN
             const handleEliminarItemCotizacion = (itemId) => {
                 if (!selectedSolicitud) return;
                 const itemsFiltrados = selectedSolicitud.items.filter(item => item.id !== itemId);
@@ -455,14 +464,10 @@
                 const itemsActuales = [...selectedSolicitud.items, nuevoItem];
                 const solActualizada = { ...selectedSolicitud, items: itemsActuales };
                 setSelectedSolicitud(solActualizada);
-                
-                // Actualiza también los estados de precios manuales para ese item
                 setPreciosCotizacion(prev => ({ ...prev, [nuevoItem.id]: precio }));
-
                 db.collection("solicitudes").doc(selectedSolicitud.id).update({ items: itemsActuales });
             };
 
-            // TOTAL COTIZACIÓN
             const totalSolicitudCotizada = useMemo(() => {
                 if (!selectedSolicitud) return 0;
                 return selectedSolicitud.items.reduce((acc, item) => {
@@ -500,7 +505,7 @@
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`);
             };
 
-            // CUENTAS CORRIENTES Y MOVIMIENTOS
+            // Cuentas Corrientes
             const handleGuardarMovimiento = async (e) => {
                 e.preventDefault();
                 const f = e.target;
@@ -524,11 +529,16 @@
                 return clientesConSaldoCalculado.find(c => c.id === selectedClienteCuenta);
             }, [clientesConSaldoCalculado, selectedClienteCuenta]);
 
+            // Movimientos filtrados por Fecha / Mes para no ver listas infinitas
             const movimientosClienteActual = useMemo(() => {
                 if (!selectedClienteCuenta) return [];
-                return movimientos.filter(m => m.cliente_id === selectedClienteCuenta)
-                                  .sort((a,b) => (b.fecha || "").localeCompare(a.fecha || ""));
-            }, [movimientos, selectedClienteCuenta]);
+                const todos = movimientos.filter(m => m.cliente_id === selectedClienteCuenta);
+                if (verTodoHistorialCC) {
+                    return todos.sort((a,b) => (b.fecha || "").localeCompare(a.fecha || ""));
+                }
+                return todos.filter(m => m.fecha && m.fecha.startsWith(mesMovimientosFiltro))
+                            .sort((a,b) => (b.fecha || "").localeCompare(a.fecha || ""));
+            }, [movimientos, selectedClienteCuenta, mesMovimientosFiltro, verTodoHistorialCC]);
 
             const saldoClienteActual = useMemo(() => {
                 return clienteCuentaSeleccionadoObj?.saldo || 0;
@@ -694,7 +704,7 @@
                                 <div className="flex justify-between items-center bg-white p-4 border-2 border-slate-400 rounded-2xl shadow-md">
                                     <div>
                                         <h3 className="font-black text-slate-950 text-sm uppercase tracking-wider">Módulo de Listas de Precios Independientes</h3>
-                                        <p className="text-xs text-slate-600 font-bold mt-0.5">Cada lista contiene sus propios productos cargados desde Excel de forma autónoma.</p>
+                                        <p className="text-xs text-slate-600 font-bold mt-0.5">Administrá productos cargados desde Excel o individualmente.</p>
                                     </div>
                                     <button onClick={handleCreateLista} className="bg-blue-600 text-white font-black text-xs px-5 py-3 rounded-xl uppercase tracking-wider shadow-md">➕ Crear Nueva Lista</button>
                                 </div>
@@ -720,9 +730,10 @@
                                                     </div>
                                                     <textarea className="w-full h-20 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pegá acá las celdas de tu Excel..." value={bulkData} onChange={e => setBulkData(e.target.value)} />
                                                     <div className="flex flex-wrap gap-2 mt-2 font-black text-xs">
-                                                        <button onClick={handleBulkProductosListaImport} className="flex-1 bg-slate-950 text-white py-3 rounded-xl shadow-md uppercase tracking-wider min-w-[200px]">Subir Excel a esta Lista</button>
-                                                        <button onClick={addTemporalProductToList} className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-3 rounded-xl uppercase shadow-md transition flex items-center gap-1">✨ Producto Especial</button>
-                                                        <button onClick={printDocumentLista} className="bg-blue-600 text-white px-5 py-3 rounded-xl uppercase shadow-md">📄 Imprimir PDF</button>
+                                                        <button onClick={handleBulkProductosListaImport} className="flex-1 bg-slate-950 text-white py-3 rounded-xl shadow-md uppercase tracking-wider min-w-[180px]">Subir Excel a esta Lista</button>
+                                                        {/* BOTÓN NUEVO: ABRE EL MODAL DE CARGA INDIVIDUAL */}
+                                                        <button onClick={() => setShowNuevoProductoModal(true)} className="bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl uppercase shadow-md transition flex items-center gap-1">➕ Nuevo Producto Individual</button>
+                                                        <button onClick={printDocumentLista} className="bg-blue-600 text-white px-4 rounded-xl uppercase shadow-md">📄 Imprimir PDF</button>
                                                     </div>
                                                 </div>
 
@@ -773,7 +784,7 @@
                             </section>
                         )}
 
-                        {/* TAB 4: COTIZACIONES ESPECIALES (MODIFICADO: AGREGAR Y ELIMINAR ÍTEMS) */}
+                        {/* TAB 4: COTIZACIONES */}
                         {activeTab === 'cotizaciones' && (
                             <section className="space-y-6">
                                 <div className="bg-white border-2 border-slate-400 rounded-3xl p-6 shadow-md">
@@ -798,7 +809,6 @@
                                                 <button onClick={() => { setSelectedSolicitud(null); setDescuentosCotizacion({}); setPreciosCotizacion({}); }} className="text-xs bg-slate-950 text-white px-4 py-2 rounded-xl font-bold uppercase">Volver</button>
                                             </div>
 
-                                            {/* BOTONES NUEVOS: AGREGAR PRODUCTOS A LA COTIZACIÓN */}
                                             <div className="flex flex-wrap gap-2 pb-2 border-b border-blue-200">
                                                 <button 
                                                     onClick={() => setShowAddProdModal(true)} 
@@ -852,11 +862,10 @@
                                                                     />
                                                                 </div>
 
-                                                                {/* BOTÓN NUEVO: ELIMINAR PRODUCTO DE LA COTIZACIÓN */}
                                                                 <button 
                                                                     onClick={() => handleEliminarItemCotizacion(item.id)} 
                                                                     className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition ml-1"
-                                                                    title="Eliminar este ítem del presupuesto"
+                                                                    title="Eliminar este ítem"
                                                                 >
                                                                     🗑️
                                                                 </button>
@@ -992,15 +1001,35 @@
                                         <div className="bg-white border-2 border-slate-400 rounded-3xl shadow-md p-6 overflow-hidden">
                                             {selectedClienteCuenta ? (
                                                 <>
-                                                    <div className="flex justify-between items-center border-b pb-4 mb-4">
+                                                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-4 mb-4 gap-2">
                                                         <div>
                                                             <h3 className="font-black text-slate-950 text-xl">{clienteCuentaSeleccionadoObj?.nombre}</h3>
                                                             <p className="text-xs text-slate-600 font-bold">📍 {clienteCuentaSeleccionadoObj?.direccion || 'Sin dirección'}</p>
                                                         </div>
-                                                        <div className="text-right">
-                                                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">Saldo Pendiente</span>
+                                                        <div className="text-left sm:text-right">
+                                                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">Saldo Pendiente Global</span>
                                                             <span className={`text-2xl font-black ${saldoClienteActual > 0.001 ? 'text-red-600' : (saldoClienteActual < -0.001 ? 'text-green-600' : 'text-slate-400')}`}>$ {saldoClienteActual.toFixed(2)}</span>
                                                         </div>
+                                                    </div>
+
+                                                    {/* FILTRO DE FECHAS / MES EN CUENTA CORRIENTE */}
+                                                    <div className="bg-slate-100 p-3 rounded-2xl border border-slate-300 flex flex-wrap justify-between items-center gap-2 mb-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-[10px] font-black uppercase text-slate-600">📅 Filtrar Mes:</span>
+                                                            <input 
+                                                                type="month" 
+                                                                disabled={verTodoHistorialCC}
+                                                                className="p-1.5 bg-white border-2 border-slate-950 rounded-xl text-xs font-bold outline-none disabled:opacity-40" 
+                                                                value={mesMovimientosFiltro} 
+                                                                onChange={e => setMesMovimientosFiltro(e.target.value)} 
+                                                            />
+                                                        </div>
+                                                        <button 
+                                                            onClick={() => setVerTodoHistorialCC(!verTodoHistorialCC)} 
+                                                            className={`text-[10px] font-black uppercase px-3 py-2 rounded-xl transition ${verTodoHistorialCC ? 'bg-blue-600 text-white' : 'bg-white border-2 border-slate-950 text-slate-800'}`}
+                                                        >
+                                                            {verTodoHistorialCC ? "Mostrar Solo Este Mes" : "Ver Todo el Historial"}
+                                                        </button>
                                                     </div>
 
                                                     <table className="w-full text-left border-collapse text-xs">
@@ -1014,7 +1043,7 @@
                                                         </thead>
                                                         <tbody className="divide-y font-bold">
                                                             {movimientosClienteActual.length === 0 ? (
-                                                                <tr><td colSpan="4" className="p-8 text-center text-slate-400 uppercase">Sin movimientos registrados</td></tr>
+                                                                <tr><td colSpan="4" className="p-8 text-center text-slate-400 uppercase">Sin movimientos en este período</td></tr>
                                                             ) : (
                                                                 movimientosClienteActual.map(m => (
                                                                     <tr key={m.id} className="hover:bg-slate-50">
@@ -1075,12 +1104,58 @@
                         )}
                     </main>
 
-                    {/* MODAL: SELECCIÓN DE LISTA PARA ENVIAR PRESUPUESTADOR */}
+                    {/* MODAL 1: ALTA INDIVIDUAL DE PRODUCTO */}
+                    {showNuevoProductoModal && (
+                        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                            <div className="bg-white rounded-3xl p-6 max-w-md w-full border-4 border-slate-950 shadow-2xl space-y-4">
+                                <div className="flex justify-between items-center border-b pb-2">
+                                    <h3 className="font-black text-slate-950 text-base uppercase">➕ Cargar Producto Individual</h3>
+                                    <button onClick={() => setShowNuevoProductoModal(false)} className="text-slate-500 font-black">✕</button>
+                                </div>
+
+                                <form onSubmit={handleGuardarNuevoProductoIndividual} className="space-y-3 text-xs font-bold">
+                                    <div>
+                                        <label className="text-slate-950 block mb-1">Descripción / Nombre del Artículo</label>
+                                        <input name="np_nombre" placeholder="Ej: Galletitas Dulces Vainilla 150g" className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl" required />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                            <label className="text-slate-950 block mb-1">Precio Específico ($)</label>
+                                            <input name="np_precio" placeholder="0.00" className="w-full p-2.5 bg-slate-50 border-2 border-blue-600 rounded-xl font-black text-blue-900" required />
+                                        </div>
+                                        <div>
+                                            <label className="text-slate-950 block mb-1">Unidades x Bulto (Pack)</label>
+                                            <input type="number" name="np_pack" defaultValue="1" min="1" className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl" required />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-950 block mb-1">Rubro / Categoría</label>
+                                        <input name="np_categoria" placeholder="Ej: ALMACEN, GALLETITAS..." defaultValue="VARIOS" className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl uppercase" />
+                                    </div>
+                                    <div>
+                                        <label className="text-slate-950 block mb-1">URL de la Imagen (Opcional)</label>
+                                        <input name="np_imagen" placeholder="https://..." className="w-full p-2.5 bg-slate-50 border-2 border-slate-950 rounded-xl" />
+                                    </div>
+                                    <div className="flex items-center gap-2 pt-1">
+                                        <input type="checkbox" id="np_oferta" name="np_oferta" className="w-4 h-4 text-red-600 rounded" />
+                                        <label htmlFor="np_oferta" className="text-red-700 font-black uppercase text-[11px] cursor-pointer">🔥 Marcar como Producto en Oferta</label>
+                                    </div>
+
+                                    <div className="flex gap-2 pt-3">
+                                        <button type="button" onClick={() => setShowNuevoProductoModal(false)} className="flex-1 bg-slate-200 text-slate-800 font-bold p-3 rounded-xl uppercase">Cancelar</button>
+                                        <button type="submit" className="flex-1 bg-slate-950 text-white font-black p-3 rounded-xl uppercase shadow-md">Guardar en Lista</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL 2: SELECCIÓN DE LISTA PARA WHATSAPP */}
                     {showListaModalWA && (
                         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-3xl p-6 max-w-md w-full border-4 border-slate-950 shadow-2xl space-y-4">
                                 <h3 className="font-black text-slate-950 text-base uppercase border-b pb-2">📲 Seleccionar Lista para Presupuestar</h3>
-                                <p className="text-xs text-slate-600 font-bold">Elegí la Lista de Precios que va a ver el cliente/comedor al abrir el cotizador especial:</p>
+                                <p className="text-xs text-slate-600 font-bold">Elegí la Lista de Precios que va a ver el cliente al abrir el cotizador especial:</p>
                                 
                                 <select 
                                     className="w-full p-3 bg-slate-100 border-2 border-slate-950 rounded-xl font-black text-xs text-slate-950 outline-none"
@@ -1094,24 +1169,14 @@
                                 </select>
 
                                 <div className="flex gap-2 pt-2">
-                                    <button 
-                                        onClick={() => setShowListaModalWA(false)} 
-                                        className="flex-1 bg-slate-200 text-slate-800 font-bold p-3 rounded-xl uppercase text-xs"
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button 
-                                        onClick={compartirPresupuestadorWA} 
-                                        className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black p-3 rounded-xl uppercase text-xs shadow-md"
-                                    >
-                                        Abrir WhatsApp
-                                    </button>
+                                    <button onClick={() => setShowListaModalWA(false)} className="flex-1 bg-slate-200 text-slate-800 font-bold p-3 rounded-xl uppercase text-xs">Cancelar</button>
+                                    <button onClick={compartirPresupuestadorWA} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-black p-3 rounded-xl uppercase text-xs shadow-md">Abrir WhatsApp</button>
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* MODAL NUEVO: AGREGAR PRODUCTO DE LA LISTA A LA COTIZACIÓN */}
+                    {/* MODAL 3: AGREGAR PRODUCTO DE LISTA A COTIZACIÓN */}
                     {showAddProdModal && (
                         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                             <div className="bg-white rounded-3xl p-6 max-w-lg w-full border-4 border-slate-950 shadow-2xl space-y-4">
@@ -1148,12 +1213,7 @@
                                     }
                                 </div>
 
-                                <button 
-                                    onClick={() => setShowAddProdModal(false)} 
-                                    className="w-full bg-slate-200 text-slate-800 font-bold p-3 rounded-xl uppercase text-xs"
-                                >
-                                    Cerrar
-                                </button>
+                                <button onClick={() => setShowAddProdModal(false)} className="w-full bg-slate-200 text-slate-800 font-bold p-3 rounded-xl uppercase text-xs">Cerrar</button>
                             </div>
                         </div>
                     )}
