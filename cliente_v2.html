@@ -46,7 +46,7 @@
             const [notasCliente, setNotasCliente] = useState("");
             const [loading, setLoading] = useState(true);
 
-            // 1. CARGA INICIAL DEL CARRITO DESDE LOCALSTORAGE PARA EVITAR PÉRDIDA POR REFRESCAR
+            // Carrito persistente en memoria local
             const [cart, setCart] = useState(() => {
                 const params = new URLSearchParams(window.location.search);
                 const clienteId = params.get('id') || 'general';
@@ -54,7 +54,6 @@
                 try { return saved ? JSON.parse(saved) : {}; } catch(e) { return {}; }
             });
 
-            // 2. GUARDA AUTOMÁTICAMENTE CADA CAMBIO DEL CARRITO EN LA MEMORIA
             useEffect(() => {
                 const params = new URLSearchParams(window.location.search);
                 const clienteId = params.get('id') || 'general';
@@ -166,10 +165,7 @@
                 msg += `---------------------------------------\n`;
                 msg += `*TOTAL ESTIMADO: $ ${totalGeneral.toFixed(2)}*`;
 
-                // Vacía el carrito después de enviar exitosamente
-                setCart({});
-                setNotasCliente("");
-
+                // NO SE BORRA EL CARRITO: Se mantiene intacto hasta que el cliente toque "Vaciar"
                 window.open(`https://wa.me/5493416384086?text=${encodeURIComponent(msg)}`, '_blank');
             };
 
@@ -178,7 +174,7 @@
                     <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-4">
                         <div className="text-center space-y-3">
                             <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                            <p className="font-bold text-sm tracking-wider uppercase">Cargando catálogo exclusivo...</p>
+                            <p className="font-bold text-sm tracking-wider uppercase">Cargando catálogo...</p>
                         </div>
                     </div>
                 );
@@ -207,8 +203,6 @@
                     </nav>
 
                     <div className="p-4 md:p-8 flex-1">
-                        
-                        {/* SECCIÓN CATÁLOGO */}
                         {activeTab === 'catalogo' && (
                             <section className="space-y-6">
                                 <input type="text" placeholder="🔍 Buscar productos por marca o rubro..." className="w-full p-4 bg-slate-50 border-2 border-slate-300 rounded-2xl outline-none focus:border-blue-600 font-bold text-sm shadow-inner" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
@@ -227,12 +221,13 @@
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                                                     {categorizedProducts[catName].map(p => {
                                                         const precioFinal = calcularPrecioFinal(p);
+                                                        const imgUrl = p.imageUrl || p.image_url || "";
                                                         return (
                                                             <div key={p.id} className="border-2 border-slate-200 rounded-2xl p-4 flex flex-col justify-between bg-white shadow-sm hover:border-blue-300 transition relative">
                                                                 <div>
                                                                     <div className="w-full h-28 bg-slate-50 rounded-xl mb-3 flex items-center justify-center overflow-hidden border border-slate-200 relative">
-                                                                        {p.imageUrl ? (
-                                                                            <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-1" />
+                                                                        {imgUrl ? (
+                                                                            <img src={imgUrl} alt={p.name} className="w-full h-full object-contain p-1" />
                                                                         ) : (
                                                                             <span className="text-slate-300 text-2xl">🖼️</span>
                                                                         )}
@@ -271,13 +266,12 @@
                             </section>
                         )}
 
-                        {/* SECCIÓN RESUMEN Y ENVÍO */}
                         {activeTab === 'pedido' && (
                             <section className="space-y-6">
                                 <div className="flex justify-between items-center border-b pb-3">
                                     <h2 className="text-xl font-black text-slate-900">Resumen de tu Pedido</h2>
                                     {selectedItems.length > 0 && (
-                                        <button onClick={vaciarCarrito} className="text-xs text-red-600 font-bold uppercase hover:underline">❌ Vaciar</button>
+                                        <button onClick={vaciarCarrito} className="text-xs text-red-600 font-bold uppercase hover:underline">❌ Vaciar Pedido</button>
                                     )}
                                 </div>
 
