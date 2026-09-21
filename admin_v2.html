@@ -795,6 +795,8 @@
                                                         <tbody className="divide-y font-bold">
                                                             {(listas.find(l=>l.id===activeListaId)?.productos || [])
                                                                 .filter(p => (p.name || "").toLowerCase().includes(listaSearch.toLowerCase()))
+                                                                .slice()
+                                                                .sort((a, b) => (a.name || "").localeCompare(b.name || "", 'es', { sensitivity: 'base' }))
                                                                 .map((p, idx) => (
                                                                     <tr key={p.id || idx} className="hover:bg-slate-50">
                                                                         <td className="p-4">
