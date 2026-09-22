@@ -9,6 +9,8 @@
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Librería para generar archivos Excel (.xlsx) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- React y Babel estables UMD -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -198,6 +200,63 @@
                 }, { merge: true });
                 setEditingCliente(null);
                 f.reset();
+            };
+
+            // 1. DESCARGAR PLANTILLA CLIENTES EN EXCEL (.xlsx)
+            const handleDescargarPlantillaClientes = () => {
+                const data = [
+                    ["Nombre Cliente", "WhatsApp", "Direccion", "Nombre exacto de Lista", "Descuento %"],
+                    ["Almacén Don Mario", "5493411234567", "San Martín 1234", "COMEDORES", 5.5],
+                    ["Kiosco Central", "5493419876543", "Pellegrini 456", "MAYORISTA", 0]
+                ];
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Clientes");
+                XLSX.writeFile(wb, "plantilla_clientes_ventasiq.xlsx");
+            };
+
+            // 2. DESCARGAR PLANTILLA PRODUCTOS EN EXCEL (.xlsx)
+            const handleDescargarPlantillaProductos = () => {
+                const data = [
+                    ["Producto", "Precio Especifico", "Pack", "Categoria", "Imagen URL", "Oferta (SI/NO)"],
+                    ["Fideos Tallarín 500g", 1450.00, 12, "ALMACEN", "https://ejemplo.com/fideos.jpg", "NO"],
+                    ["Aceite Girasol 900ml", 1890.50, 15, "COMESTIBLES", "", "SI"]
+                ];
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Plantilla_Productos");
+                XLSX.writeFile(wb, "plantilla_productos_ventasiq.xlsx");
+            };
+
+            // 3. EXPORTAR PRODUCTOS DE LA LISTA ACTIVA A EXCEL (.xlsx)
+            const handleExportarProductosListaActiva = () => {
+                if (!activeListaId) return alert("Por favor, seleccioná una lista de la izquierda para exportar.");
+                const listaActual = listas.find(l => l.id === activeListaId);
+                const prods = listaActual?.productos || [];
+                if (prods.length === 0) return alert("Esta lista no tiene productos para exportar.");
+
+                const data = [
+                    ["Producto", "Precio Especifico", "Pack", "Categoria", "Imagen URL", "Oferta (SI/NO)"]
+                ];
+
+                prods.forEach(p => {
+                    data.push([
+                        p.name || "",
+                        Number(p.price || 0),
+                        Number(p.pack || 1),
+                        p.category || "VARIOS",
+                        p.imageUrl || p.image_url || "",
+                        p.es_oferta ? "SI" : "NO"
+                    ]);
+                });
+
+                const ws = XLSX.utils.aoa_to_sheet(data);
+                const wb = XLSX.utils.book_new();
+                const nombreHoja = (listaActual.nombre_lista || "Productos").slice(0, 31);
+                XLSX.utils.book_append_sheet(wb, ws, nombreHoja);
+
+                const nombreArchivo = `lista_${(listaActual.nombre_lista || "productos").toLowerCase().replace(/\s+/g, "_")}.xlsx`;
+                XLSX.writeFile(wb, nombreArchivo);
             };
 
             const handleBulkClientesImport = async () => {
@@ -653,9 +712,16 @@
                         {activeTab === 'clientes' && (
                             <section className="space-y-6">
                                 <div className="bg-blue-50 p-6 rounded-3xl border-2 border-blue-400 shadow-md">
-                                    <div className="flex justify-between items-center mb-2">
+                                    <div className="flex flex-wrap justify-between items-center mb-2 gap-2">
                                         <h3 className="font-black text-blue-950 text-sm uppercase tracking-wider">📋 Importación Masiva de Clientes con Descuento (Excel)</h3>
-                                        <button onClick={async () => { if(confirm("¿Vaciar clientes?")) db.collection("v3_clientes").get().then(s=>s.forEach(d=>d.ref.delete())); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-red-800">🗑️ Vaciar Cartera</button>
+                                        <div className="flex items-center gap-2">
+                                            <button onClick={handleDescargarPlantillaClientes} className="bg-green-600 hover:bg-green-700 text-white font-black text-[10px] uppercase px-3 py-2 rounded-xl shadow-sm transition">
+                                                📥 Plantilla Clientes (.xlsx)
+                                            </button>
+                                            <button onClick={async () => { if(confirm("¿Vaciar clientes?")) db.collection("v3_clientes").get().then(s=>s.forEach(d=>d.ref.delete())); }} className="bg-red-600 text-white font-black text-[10px] uppercase px-3 py-2 rounded-xl border border-red-800">
+                                                🗑️ Vaciar Cartera
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="bg-blue-950 p-3 rounded-xl border-2 border-slate-950 font-mono text-[11px] font-black text-cyan-400 mb-3 text-center tracking-wide shadow-inner">
                                         Nombre Cliente [TAB] WhatsApp [TAB] Dirección [TAB] Nombre exacto de Lista [TAB] Descuento % (Ej: 5.5)
@@ -778,9 +844,10 @@
                                                     <textarea className="w-full h-20 p-4 rounded-2xl border-2 border-slate-950 text-xs font-mono outline-none bg-white text-slate-950 font-bold" placeholder="Pegá acá las celdas de tu Excel..." value={bulkData} onChange={e => setBulkData(e.target.value)} />
                                                     <div className="flex flex-wrap gap-2 mt-2 font-black text-xs">
                                                         <button onClick={handleBulkProductosListaImport} className="flex-1 bg-slate-950 text-white py-3 rounded-xl shadow-md uppercase tracking-wider min-w-[180px]">Subir Excel a esta Lista</button>
-                                                        {/* BOTÓN NUEVO: ABRE EL MODAL DE CARGA INDIVIDUAL */}
-                                                        <button onClick={() => setShowNuevoProductoModal(true)} className="bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl uppercase shadow-md transition flex items-center gap-1">➕ Nuevo Producto Individual</button>
-                                                        <button onClick={printDocumentLista} className="bg-blue-600 text-white px-4 rounded-xl uppercase shadow-md">📄 Imprimir PDF</button>
+                                                        <button onClick={() => setShowNuevoProductoModal(true)} className="bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-xl uppercase shadow-md transition flex items-center gap-1">➕ Producto Individual</button>
+                                                        <button onClick={handleExportarProductosListaActiva} className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-3 rounded-xl uppercase shadow-md transition">📊 Exportar Lista (.xlsx)</button>
+                                                        <button onClick={handleDescargarPlantillaProductos} className="bg-slate-700 hover:bg-slate-800 text-white px-3 py-3 rounded-xl uppercase shadow-md transition">📥 Plantilla (.xlsx)</button>
+                                                        <button onClick={printDocumentLista} className="bg-blue-600 text-white px-4 rounded-xl uppercase shadow-md">📄 PDF</button>
                                                     </div>
                                                 </div>
 
